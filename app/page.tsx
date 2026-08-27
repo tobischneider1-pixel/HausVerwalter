@@ -151,7 +151,7 @@ export default function Home() {
     property_id: "",
     unit_id: "",
     tenant_id: "",
-    kategorie: "Heizkosten (warm)",
+    kategorie: "Abfallentsorgung",
     betrag: "",
     rechnungsdatum: new Date().toISOString().split("T")[0],
     zeitraum_von: "",
@@ -750,7 +750,7 @@ export default function Home() {
               </div>
             )}
 
-            {/* BETRIEBSKOSTEN (STRUKTURIERT MIT UNTERMENÜ) */}
+            {/* BETRIEBSKOSTEN (STRUKTURIERT NACH VORGABE) */}
             {activePage === "Betriebskosten" && (
               <div>
                 <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
@@ -818,31 +818,135 @@ export default function Home() {
                         <span className="text-xs bg-blue-50 text-blue-700 px-2.5 py-1 rounded-full font-semibold">Stichtag: 31.12.{bkYear}</span>
                       </div>
 
-                      <div className="text-xs text-gray-500 mb-4">
-                        Wählen Sie die anfallenden Kostenarten aus und erfassen Sie die Gesamtkosten. Die Aufteilung auf die Einheiten erfolgt automatisch nach Quadratmetern oder Verteilungsmaßstab.
+                      <div className="text-xs text-gray-500 mb-6">
+                        Erfassen Sie die Gesamtkosten. Nicht umlagefähige Positionen, automatische Erträge (bei Guthaben) und die Rücklagenbildung erscheinen ausschließlich in Ihrer Vermieter-Gesamtübersicht.
                       </div>
 
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left text-sm">
-                          <thead className="border-b border-[#e7ebf2] bg-gray-50 text-xs text-gray-500">
-                            <tr>
-                              <th className="p-3 w-10 text-center">Aktiv</th>
-                              <th className="p-3">Kostenart (Heiz-/Warm- & Kalte Kosten)</th>
-                              <th className="p-3">Verteilerschlüssel</th>
-                              <th className="p-3 text-right">Gesamtkosten (€)</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-[#e7ebf2] text-xs">
-                            <CostItemRow label="Heizkosten (warm)" defaultActive={true} defaultKey="Wohnfläche (m²)" defaultAmount="2450.00" />
-                            <CostItemRow label="Warmwasser (warm)" defaultActive={true} defaultKey="Verbrauch / m²" defaultAmount="820.00" />
-                            <CostItemRow label="Müllabfuhr (kalt)" defaultActive={true} defaultKey="Personen / Einheiten" defaultAmount="640.00" />
-                            <CostItemRow label="Wasser / Abwasser (kalt)" defaultActive={true} defaultKey="Wasserzähler (m³)" defaultAmount="1100.00" />
-                            <CostItemRow label="Hausmeister / Reinigung (kalt)" defaultActive={true} defaultKey="Wohnfläche (m²)" defaultAmount="1500.00" />
-                            <CostItemRow label="Grundsteuer (kalt)" defaultActive={true} defaultKey="Anteile (1000stel)" defaultAmount="950.00" />
-                            <CostItemRow label="Gebäudeversicherung (kalt)" defaultActive={true} defaultKey="Anteile (1000stel)" defaultAmount="780.00" />
-                            <CostItemRow label="Gartenpflege (kalt)" defaultActive={false} defaultKey="Wohnfläche (m²)" defaultAmount="0.00" />
-                          </tbody>
-                        </table>
+                      <div className="overflow-x-auto space-y-8">
+                        {/* I. Bewirtschaftung (Kosten) - Umlagefähige kalte Betriebskosten */}
+                        <div>
+                          <h4 className="text-sm font-bold text-gray-900 border-b border-gray-200 pb-2 mb-3">
+                            I. Bewirtschaftung (Kosten) – Umlagefähige kalte Betriebskosten
+                          </h4>
+                          <table className="w-full text-left text-sm">
+                            <thead className="bg-gray-50 text-xs text-gray-500">
+                              <tr>
+                                <th className="p-2.5 w-10 text-center">Aktiv</th>
+                                <th className="p-2.5">Kostenart</th>
+                                <th className="p-2.5">Verteilerschlüssel</th>
+                                <th className="p-2.5 text-right">Gesamtkosten (€)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-[#e7ebf2] text-xs">
+                              <CostItemRow label="Abfallentsorgung" defaultActive={true} defaultKey="Personen / Einheiten" defaultAmount="640.00" />
+                              <CostItemRow label="Oberflächenwasser" defaultActive={true} defaultKey="Wohnfläche (m²)" defaultAmount="210.00" />
+                              <CostItemRow label="Straßenreinigung" defaultActive={true} defaultKey="Wohnfläche (m²)" defaultAmount="150.00" />
+                              <CostItemRow label="Gebäudehaftpflichtversicherung" defaultActive={true} defaultKey="Anteile (1000stel)" defaultAmount="320.00" />
+                              <CostItemRow label="Geb.-Vers. Leitungswasser/Sturm" defaultActive={true} defaultKey="Anteile (1000stel)" defaultAmount="780.00" />
+                              <CostItemRow label="Glasbruchversicherung" defaultActive={false} defaultKey="Anteile (1000stel)" defaultAmount="0.00" />
+                              <CostItemRow label="Strom (Beleuchtung)" defaultActive={true} defaultKey="Wohnfläche (m²)" defaultAmount="190.00" />
+                              <CostItemRow label="Gartenpflege (Fremdfirma)" defaultActive={true} defaultKey="Wohnfläche (m²)" defaultAmount="850.00" />
+                              <CostItemRow label="Reinigung (Fremdfirma)" defaultActive={true} defaultKey="Wohnfläche (m²)" defaultAmount="1200.00" />
+                              <CostItemRow label="Hausmeister (Fremdfirma)" defaultActive={true} defaultKey="Wohnfläche (m²)" defaultAmount="1500.00" />
+                              <CostItemRow label="Wartung RWM" defaultActive={true} defaultKey="Wohnfläche (m²)" defaultAmount="250.00" />
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* II. Umlagefähige warme Betriebskosten */}
+                        <div>
+                          <h4 className="text-sm font-bold text-gray-900 border-b border-gray-200 pb-2 mb-3">
+                            II. Umlagefähige warme Betriebskosten
+                          </h4>
+                          <table className="w-full text-left text-sm">
+                            <thead className="bg-gray-50 text-xs text-gray-500">
+                              <tr>
+                                <th className="p-2.5 w-10 text-center">Aktiv</th>
+                                <th className="p-2.5">Kostenart</th>
+                                <th className="p-2.5">Verteilerschlüssel</th>
+                                <th className="p-2.5 text-right">Gesamtkosten (€)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-[#e7ebf2] text-xs">
+                              <CostItemRow label="Heizkosten gemäß Fremdabrechner" defaultActive={true} defaultKey="Verbrauch / m²" defaultAmount="2450.00" />
+                              <CostItemRow label="Warmwasser gemäß Fremdabrechner" defaultActive={true} defaultKey="Verbrauch / m²" defaultAmount="820.00" />
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* III. Nicht umlagefähige Positionen (NUR Vermieteransicht) */}
+                        <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-4">
+                          <div className="flex items-center justify-between mb-3 border-b border-amber-200 pb-2">
+                            <h4 className="text-sm font-bold text-amber-900">
+                              🔒 Nicht umlagefähige Positionen (Nur für Vermieter / Dashboard sichtbar)
+                            </h4>
+                            <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-semibold uppercase">Vermieter-Ansicht</span>
+                          </div>
+                          <table className="w-full text-left text-sm">
+                            <thead className="bg-amber-100/50 text-xs text-amber-900">
+                              <tr>
+                                <th className="p-2.5 w-10 text-center">Aktiv</th>
+                                <th className="p-2.5">Kostenart</th>
+                                <th className="p-2.5">Verteilerschlüssel</th>
+                                <th className="p-2.5 text-right">Gesamtkosten (€)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-amber-200 text-xs">
+                              <CostItemRow label="Rauchwarnmelder Miete" defaultActive={true} defaultKey="Anteile (1000stel)" defaultAmount="120.00" />
+                              <CostItemRow label="Reparaturen" defaultActive={true} defaultKey="Anteile (1000stel)" defaultAmount="450.00" />
+                              <CostItemRow label="Kontoführungskosten (Giro)" defaultActive={true} defaultKey="Anteile (1000stel)" defaultAmount="85.00" />
+                              <CostItemRow label="Kosten Direktordnung" defaultActive={false} defaultKey="Anteile (1000stel)" defaultAmount="0.00" />
+                              <CostItemRow label="Verwalterentgelt" defaultActive={true} defaultKey="Anteile (1000stel)" defaultAmount="960.00" />
+                              <CostItemRow label="Verwalterentgelt (gem. Vereinb.)" defaultActive={false} defaultKey="Anteile (1000stel)" defaultAmount="0.00" />
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* IV. Bewirtschaftung (Erträge) */}
+                        <div>
+                          <h4 className="text-sm font-bold text-gray-900 border-b border-gray-200 pb-2 mb-3">
+                            III. Bewirtschaftung (Erträge) – Automatische Guthaben-Ausweisung
+                          </h4>
+                          <p className="text-xs text-gray-500 mb-2">
+                            Kein manuelles Auswahlfeld. Erträge/Gutschriften werden automatisch erfasst, falls Einheiten Nebenkosten-Guthaben aufweisen.
+                          </p>
+                          <table className="w-full text-left text-sm">
+                            <thead className="bg-gray-50 text-xs text-gray-500">
+                              <tr>
+                                <th className="p-2.5">Ertragsart / Ausweis</th>
+                                <th className="p-2.5 text-right">Betrag (€)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-[#e7ebf2] text-xs">
+                              <tr>
+                                <td className="p-2.5 font-medium text-gray-700">Umlagefähige kalte Betriebskosten (Gutschriften / Rückzahlungen)</td>
+                                <td className="p-2.5 text-right font-semibold text-green-600">0,00 € (Auto)</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* V. Rücklage (NUR Vermieteransicht) */}
+                        <div className="rounded-xl border border-blue-200 bg-blue-50/30 p-4">
+                          <div className="flex items-center justify-between mb-3 border-b border-blue-200 pb-2">
+                            <h4 className="text-sm font-bold text-blue-900">
+                              🔒 IV. Rücklage – Zuführung lt. WP / Beschluss (Nur für Vermieter)
+                            </h4>
+                            <span className="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-semibold uppercase">Vermieter-Ansicht</span>
+                          </div>
+                          <table className="w-full text-left text-sm">
+                            <thead className="bg-blue-100/50 text-xs text-blue-900">
+                              <tr>
+                                <th className="p-2.5 w-10 text-center">Aktiv</th>
+                                <th className="p-2.5">Beschreibung / Rücklagen-Schlüssel</th>
+                                <th className="p-2.5 text-right">Zuführung zum 31.12.{bkYear} (€)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-blue-200 text-xs">
+                              <CostItemRow label="Soll Rücklage (Zuführung lt. Wirtschaftsplan)" defaultActive={true} defaultKey="Anteile (1000stel)" defaultAmount="1200.00" />
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
 
                       <div className="mt-6 flex justify-end gap-3 border-t pt-4">
@@ -965,12 +1069,10 @@ export default function Home() {
                     value={newOperatingCost.kategorie}
                     onChange={(e) => setNewOperatingCost({ ...newOperatingCost, kategorie: e.target.value })}
                   >
-                    <option value="Heizkosten (warm)">Heizkosten (warm)</option>
-                    <option value="Warmwasser (warm)">Warmwasser (warm)</option>
-                    <option value="Müllabfuhr (kalt)">Müllabfuhr (kalt)</option>
-                    <option value="Wasser/Abwasser (kalt)">Wasser / Abwasser (kalt)</option>
-                    <option value="Hausmeister (kalt)">Hausmeister / Reinigung (kalt)</option>
-                    <option value="Versicherung (kalt)">Versicherung / Grundsteuer (kalt)</option>
+                    <option value="Abfallentsorgung">Abfallentsorgung</option>
+                    <option value="Heizkosten gemäß Fremdabrechner">Heizkosten gemäß Fremdabrechner</option>
+                    <option value="Reparaturen (Nicht umlagefähig)">Reparaturen (Nicht umlagefähig)</option>
+                    <option value="Verwalterentgelt">Verwalterentgelt</option>
                   </select>
                 </div>
 
@@ -1061,7 +1163,7 @@ function CostItemRow({ label, defaultActive, defaultKey, defaultAmount }: { labe
 
   return (
     <tr className="hover:bg-gray-50">
-      <td className="p-3 text-center">
+      <td className="p-2.5 text-center">
         <input
           type="checkbox"
           checked={active}
@@ -1069,10 +1171,10 @@ function CostItemRow({ label, defaultActive, defaultKey, defaultAmount }: { labe
           className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
         />
       </td>
-      <td className={`p-3 font-medium ${!active ? "text-gray-400 line-through" : "text-gray-800"}`}>
+      <td className={`p-2.5 font-medium ${!active ? "text-gray-400 line-through" : "text-gray-800"}`}>
         {label}
       </td>
-      <td className="p-3">
+      <td className="p-2.5">
         <select
           value={keyType}
           onChange={(e) => setKeyType(e.target.value)}
@@ -1086,7 +1188,7 @@ function CostItemRow({ label, defaultActive, defaultKey, defaultAmount }: { labe
           <option value="Wasserzähler (m³)">Wasserzähler (m³)</option>
         </select>
       </td>
-      <td className="p-3 text-right">
+      <td className="p-2.5 text-right">
         <input
           type="number"
           step="0.01"
