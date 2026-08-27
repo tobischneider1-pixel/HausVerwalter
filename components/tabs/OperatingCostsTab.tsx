@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { Property, Tenant, Unit } from "@/types";
@@ -52,25 +52,54 @@ export function OperatingCostsTab({ properties, units, tenants }: Props) {
   const [year, setYear] = useState("2025");
   const [globalKey, setGlobalKey] = useState("Wohnfläche (m²)");
 
+  // Kosten-Daten
   const [costs, setCosts] = useState<CostRow[]>(
     DEFAULT_COST_ITEMS.map((item, idx) => ({ ...item, id: idx.toString() }))
   );
+
+  // Parameter für Verteilungsschlüssel (Wohnung vs. Gesamt)
+  const [unitSqm, setUnitSqm] = useState(75);
+  const [totalSqm, setTotalSqm] = useState(175);
+  
+  const [unitShares, setUnitShares] = useState(429);
+  const [totalShares, setTotalShares] = useState(1000);
+  
+  const [unitPersons, setUnitPersons] = useState(2);
+  const [totalPersons, setTotalPersons] = useState(6);
 
   const selectedProperty = properties.find((p) => p.id === selectedPropertyId) || properties[0];
   const selectedTenant = tenants.find((t) => t.id === selectedTenantId) || tenants[0];
   const selectedUnit = units.find((u) => u.id === selectedTenant?.unit_id);
 
-  const totalPropertySqm = units
-    .filter((u) => u.property_id === selectedPropertyId)
-    .reduce((sum, u) => sum + (u.size_sqm || 0), 0) || 1;
+  // Automatische Anpassung bei Mieter-Auswahl
+  useEffect(() => {
+    if (selectedUnit?.size_sqm) {
+      setUnitSqm(selectedUnit.size_sqm);
+    }
+    const propertyUnits = units.filter((u) => u.property_id === selectedPropertyId);
+    const sumSqm = propertyUnits.reduce((acc, u) => acc + (u.size_sqm || 0), 0);
+    if (sumSqm > 0) setTotalSqm(sumSqm);
+  }, [selectedTenantId, selectedPropertyId, units, selectedUnit]);
+
+  // Berechnung des Anteils je Kostenart
+  const calculateItemShare = (item: CostRow): number => {
+    if (item.key === "Anteile (1000stel)") {
+      return item.amount * (unitShares / (totalShares || 1));
+    }
+    if (item.key === "Personen / Einheiten") {
+      return item.amount * (unitPersons / (totalPersons || 1));
+    }
+    if (item.key === "Direktzuordnung") {
+      return item.amount;
+    }
+    // Standard: Wohnfläche (m²)
+    return item.amount * (unitSqm / (totalSqm || 1));
+  };
 
   const activeReclaimableCosts = costs.filter((c) => c.active && c.type !== "non_reclaimable");
-  const totalCosts = activeReclaimableCosts.reduce((sum, item) => sum + item.amount, 0);
-  
-  const tenantSqm = selectedUnit?.size_sqm || 0;
-  const sqmRatio = tenantSqm / totalPropertySqm;
+  const totalBuildingCosts = activeReclaimableCosts.reduce((sum, item) => sum + item.amount, 0);
+  const tenantShareTotal = activeReclaimableCosts.reduce((sum, item) => sum + calculateItemShare(item), 0);
 
-  const tenantShareTotal = totalCosts * sqmRatio;
   const annualAdvance = (selectedTenant?.utility_advance || 0) * 12;
   const balance = tenantShareTotal - annualAdvance;
 
@@ -91,12 +120,8 @@ export function OperatingCostsTab({ properties, units, tenants }: Props) {
     setCosts(costs.map((c) => ({ ...c, key })));
   }
 
-  function handleSaveAndProceed() {
-    setSubTab("split");
-  }
-
   function generatePDF() {
-    if (!selectedProperty || !selectedTenant || !selectedUnit) {
+    if (!selectedProperty || !selectedTenant) {
       alert("Bitte wählen Sie ein Objekt und einen Mieter aus.");
       return;
     }
@@ -110,13 +135,13 @@ export function OperatingCostsTab({ properties, units, tenants }: Props) {
     doc.setFont("helvetica", "normal");
     doc.text(`Objekt: ${selectedProperty.name}, ${selectedProperty.address}`, 14, 28);
     doc.text(`Mieter: ${selectedTenant.first_name} ${selectedTenant.last_name}`, 14, 34);
-    doc.text(`Einheit: ${selectedUnit.unit_number} (${tenantSqm} m²)`, 14, 40);
+    doc.text(`Einheit: ${selectedUnit?.unit_number || "Wohnung"} (${unitSqm} m²)`, 14, 40);
 
     const tableData = activeReclaimableCosts.map((item) => [
       item.category,
       item.key,
       `${item.amount.toFixed(2)} €`,
-      `${(item.amount * sqmRatio).toFixed(2)} €`,
+      `${calculateItemShare(item).toFixed(2)} €`,
     ]);
 
     autoTable(doc, {
@@ -303,24 +328,18 @@ export function OperatingCostsTab({ properties, units, tenants }: Props) {
             </div>
           </div>
 
-          {/* Sektion 1: Kalte Betriebskosten */}
           {renderCostTable("Umlagefähige kalte Betriebskosten", "cold")}
-
-          {/* Sektion 2: Warme Betriebskosten */}
           {renderCostTable("Warme Betriebskosten (Heizung & Warmwasser)", "warm")}
-
-          {/* Sektion 3: Nicht umlagefähige Kosten */}
           {renderCostTable("Nicht umlagefähige Betriebskosten", "non_reclaimable", "Diese Kosten werden nicht auf die Mieter umgelegt")}
 
-          {/* Unterer Aktionsbereich / Speichern & Weiter Button */}
           <div className="flex flex-col sm:flex-row justify-between items-center pt-5 border-t border-slate-200 gap-4">
             <div>
               <span className="text-xs font-semibold text-slate-500 block">Gesamtsumme Umlagefähig:</span>
-              <span className="text-base font-bold text-slate-900">{totalCosts.toFixed(2)} €</span>
+              <span className="text-base font-bold text-slate-900">{totalBuildingCosts.toFixed(2)} €</span>
             </div>
             
             <button
-              onClick={handleSaveAndProceed}
+              onClick={() => setSubTab("split")}
               className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-5 py-2.5 rounded-lg shadow-sm transition-all flex items-center gap-2 text-xs"
             >
               💾 Speichern & zur Aufteilung nach Wohnung ➔
@@ -331,48 +350,160 @@ export function OperatingCostsTab({ properties, units, tenants }: Props) {
 
       {/* SUBTAB 2: Aufteilung nach Wohnung */}
       {subTab === "split" && (
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <h3 className="font-bold text-slate-900 text-sm">Abrechnung pro Mieter & Wohnung zuordnen</h3>
-            <div className="flex items-center gap-2">
-              <span className="font-semibold text-slate-500">Mieter / Einheit wählen:</span>
-              <select
-                value={selectedTenantId}
-                onChange={(e) => setSelectedTenantId(e.target.value)}
-                className="rounded border border-slate-300 p-1.5 bg-white"
-              >
-                {tenants.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.first_name} {t.last_name} ({units.find((u) => u.id === t.unit_id)?.unit_number || "Keine Einheit"})
-                  </option>
-                ))}
-              </select>
+        <div className="space-y-6">
+          {/* Kopfzeile & Mieterwahl */}
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="font-bold text-slate-900 text-sm">Abrechnung pro Mieter & Wohnung zuordnen</h3>
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-slate-500">Mieter / Einheit wählen:</span>
+                <select
+                  value={selectedTenantId}
+                  onChange={(e) => setSelectedTenantId(e.target.value)}
+                  className="rounded border border-slate-300 p-1.5 bg-white font-medium"
+                >
+                  {tenants.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.first_name} {t.last_name} ({units.find((u) => u.id === t.unit_id)?.unit_number || "Einheit"})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Wohnungs-Parameter Eingabemaske */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-lg border border-slate-200/80">
+              <div className="space-y-1">
+                <label className="font-semibold block text-slate-700">Wohnfläche ($\text{m}^2$)</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={unitSqm}
+                    onChange={(e) => setUnitSqm(parseFloat(e.target.value) || 0)}
+                    className="w-24 rounded border border-slate-300 p-1.5 bg-white font-semibold text-center"
+                  />
+                  <span className="text-slate-400">/</span>
+                  <input
+                    type="number"
+                    value={totalSqm}
+                    onChange={(e) => setTotalSqm(parseFloat(e.target.value) || 0)}
+                    className="w-24 rounded border border-slate-300 p-1.5 bg-white font-semibold text-center"
+                  />
+                  <span className="text-slate-500 font-medium">$\text{m}^2$ gesamt</span>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-semibold block text-slate-700">Miteigentumsanteile (1000stel)</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={unitShares}
+                    onChange={(e) => setUnitShares(parseFloat(e.target.value) || 0)}
+                    className="w-24 rounded border border-slate-300 p-1.5 bg-white font-semibold text-center"
+                  />
+                  <span className="text-slate-400">/</span>
+                  <input
+                    type="number"
+                    value={totalShares}
+                    onChange={(e) => setTotalShares(parseFloat(e.target.value) || 0)}
+                    className="w-24 rounded border border-slate-300 p-1.5 bg-white font-semibold text-center"
+                  />
+                  <span className="text-slate-500 font-medium">Anteile gesamt</span>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-semibold block text-slate-700">Personen im Haushalt</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={unitPersons}
+                    onChange={(e) => setUnitPersons(parseFloat(e.target.value) || 0)}
+                    className="w-24 rounded border border-slate-300 p-1.5 bg-white font-semibold text-center"
+                  />
+                  <span className="text-slate-400">/</span>
+                  <input
+                    type="number"
+                    value={totalPersons}
+                    onChange={(e) => setTotalPersons(parseFloat(e.target.value) || 0)}
+                    className="w-24 rounded border border-slate-300 p-1.5 bg-white font-semibold text-center"
+                  />
+                  <span className="text-slate-500 font-medium">Personen gesamt</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Zusammenfassende Werte */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+              <div className="bg-blue-50/60 p-3 rounded-lg border border-blue-100">
+                <span className="text-slate-500 block text-[11px] font-medium">Anteilige Gesamtkosten:</span>
+                <span className="text-sm font-bold text-blue-900">{tenantShareTotal.toFixed(2)} €</span>
+              </div>
+              <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <span className="text-slate-500 block text-[11px] font-medium">Geleistete Vorauszahlungen (12 M.):</span>
+                <span className="text-sm font-bold text-slate-800">{annualAdvance.toFixed(2)} €</span>
+              </div>
+              <div className={`p-3 rounded-lg border ${balance >= 0 ? "bg-red-50 border-red-200 text-red-700" : "bg-emerald-50 border-emerald-200 text-emerald-700"}`}>
+                <span className="block text-[11px] font-medium">{balance >= 0 ? "Nachzahlung Mieter:" : "Guthaben Mieter:"}</span>
+                <span className="text-sm font-bold">{Math.abs(balance).toFixed(2)} €</span>
+              </div>
             </div>
           </div>
 
-          <div className="bg-slate-50 p-4 rounded-lg space-y-2 text-xs border border-slate-100">
-            <p><strong>Mieter:</strong> {selectedTenant?.first_name} {selectedTenant?.last_name}</p>
-            <p><strong>Wohnfläche Mieter:</strong> {tenantSqm} m² von {totalPropertySqm} m² ({((tenantSqm / totalPropertySqm) * 100).toFixed(1)} %)</p>
-            <p><strong>Anteilige Gesamtkosten:</strong> {tenantShareTotal.toFixed(2)} €</p>
-            <p><strong>Geleistete Vorauszahlungen (12 Monate):</strong> {annualAdvance.toFixed(2)} €</p>
-            <p className={`font-bold text-sm ${balance >= 0 ? "text-red-600" : "text-emerald-600"}`}>
-              {balance >= 0 ? `Nachzahlung: ${balance.toFixed(2)} €` : `Guthaben: ${Math.abs(balance).toFixed(2)} €`}
-            </p>
-          </div>
+          {/* Einzelkosten-Tabelle für die gewählte Wohnung */}
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+            <h4 className="font-bold text-slate-900 text-sm border-b border-slate-100 pb-2">
+              Einzelkosten-Aufschlüsselung für {selectedTenant?.first_name} {selectedTenant?.last_name}
+            </h4>
 
-          <div className="flex justify-between items-center pt-2">
-            <button
-              onClick={() => setSubTab("costs")}
-              className="text-slate-600 hover:text-slate-800 font-semibold text-xs"
-            >
-              ← Zurück zur Gesamtkostenerfassung
-            </button>
-            <button
-              onClick={generatePDF}
-              className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-2 rounded-lg transition-colors flex items-center gap-2 text-xs"
-            >
-              📄 Abrechnung als PDF herunterladen
-            </button>
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-200 text-slate-400 font-semibold text-[11px]">
+                  <th className="py-2">Kostenart</th>
+                  <th className="py-2">Verteilerschlüssel</th>
+                  <th className="py-2 text-right">Gesamtkosten Haus (€)</th>
+                  <th className="py-2 text-center">Berechnungsgrundlage</th>
+                  <th className="py-2 text-right">Anteil Wohnung (€)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {activeReclaimableCosts.map((item) => {
+                  const share = calculateItemShare(item);
+                  let calcText = "";
+                  if (item.key === "Anteile (1000stel)") calcText = `${unitShares} / ${totalShares} Anteile`;
+                  else if (item.key === "Personen / Einheiten") calcText = `${unitPersons} / ${totalPersons} Pers.`;
+                  else if (item.key === "Direktzuordnung") calcText = "100% Direkt";
+                  else calcText = `${unitSqm} / ${totalSqm} m²`;
+
+                  return (
+                    <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50/50">
+                      <td className="py-2 font-medium text-slate-800">{item.category}</td>
+                      <td className="py-2 text-slate-500">{item.key}</td>
+                      <td className="py-2 text-right font-medium">{item.amount.toFixed(2)} €</td>
+                      <td className="py-2 text-center text-slate-500 text-[11px]">{calcText}</td>
+                      <td className="py-2 text-right font-bold text-slate-900">{share.toFixed(2)} €</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+
+            <div className="flex justify-between items-center pt-4 border-t border-slate-200">
+              <button
+                onClick={() => setSubTab("costs")}
+                className="text-slate-600 hover:text-slate-800 font-semibold text-xs"
+              >
+                ← Zurück zur Gesamtkostenerfassung
+              </button>
+
+              <button
+                onClick={generatePDF}
+                className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-2 rounded-lg transition-colors flex items-center gap-2 text-xs shadow-sm"
+              >
+                📄 Abrechnung als PDF herunterladen
+              </button>
+            </div>
           </div>
         </div>
       )}
