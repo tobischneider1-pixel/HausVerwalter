@@ -20,8 +20,23 @@ interface CostRow {
   type: CostCategoryType;
 }
 
+interface UploadedDocument {
+  id: string;
+  fileName: string;
+  fileSize: string;
+  uploadDate: string;
+  status: "analyzing" | "ready" | "imported";
+  aiData?: {
+    category: string;
+    amount: number;
+    suggestedKey: string;
+    type: CostCategoryType;
+    invoiceDate: string;
+    creditor: string;
+  };
+}
+
 const DEFAULT_COST_ITEMS: Omit<CostRow, "id">[] = [
-  // Kalte Betriebskosten
   { active: true, category: "Abfallentsorgung", key: "Anteile (1000stel)", amount: 1310.4, type: "cold" },
   { active: true, category: "Oberflächenwasser", key: "Wohnfläche (m²)", amount: 210.0, type: "cold" },
   { active: true, category: "Straßenreinigung", key: "Wohnfläche (m²)", amount: 150.0, type: "cold" },
@@ -32,13 +47,9 @@ const DEFAULT_COST_ITEMS: Omit<CostRow, "id">[] = [
   { active: true, category: "Gartenpflege (Fremdfirma)", key: "Wohnfläche (m²)", amount: 850.0, type: "cold" },
   { active: true, category: "Reinigung (Fremdfirma)", key: "Wohnfläche (m²)", amount: 1200.0, type: "cold" },
   { active: true, category: "Hausmeister (Fremdfirma)", key: "Wohnfläche (m²)", amount: 1500.0, type: "cold" },
-
-  // Warme Betriebskosten
   { active: true, category: "Heizenergie / Gas / Fernwärme", key: "Wohnfläche (m²)", amount: 2450.0, type: "warm" },
   { active: true, category: "Warmwasseraufbereitung", key: "Wohnfläche (m²)", amount: 890.0, type: "warm" },
   { active: true, category: "Abrechnungsdienstleister (z.B. Techem/Ista)", key: "Direktzuordnung", amount: 340.0, type: "warm" },
-
-  // Nicht umlagefähig
   { active: false, category: "Verwaltungskosten", key: "Direktzuordnung", amount: 600.0, type: "non_reclaimable" },
   { active: false, category: "Instandhaltungsrücklage / Reparaturen", key: "Direktzuordnung", amount: 1200.0, type: "non_reclaimable" },
 ];
@@ -53,6 +64,27 @@ export function OperatingCostsTab({ properties = [], units = [], tenants = [] }:
   const [costs, setCosts] = useState<CostRow[]>(
     DEFAULT_COST_ITEMS.map((item, idx) => ({ ...item, id: idx.toString() }))
   );
+
+  // Belege & KI-Assistent States
+  const [documents, setDocuments] = useState<UploadedDocument[]>([
+    {
+      id: "doc-1",
+      fileName: "Rechnung_Gartenpflege_2025.pdf",
+      fileSize: "1.2 MB",
+      uploadDate: "12.01.2026",
+      status: "ready",
+      aiData: {
+        category: "Gartenpflege (Fremdfirma)",
+        amount: 850.0,
+        suggestedKey: "Wohnfläche (m²)",
+        type: "cold",
+        invoiceDate: "10.01.2026",
+        creditor: "Grün & Sauber GmbH",
+      },
+    },
+  ]);
+  const [selectedDocForImport, setSelectedDocForImport] = useState<UploadedDocument | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
 
   const [unitSqm, setUnitSqm] = useState(75);
   const [totalSqm, setTotalSqm] = useState(175);
@@ -111,7 +143,76 @@ export function OperatingCostsTab({ properties = [], units = [], tenants = [] }:
     setCosts(costs.map((c) => ({ ...c, key })));
   }
 
-  // PDF-Generierung mit dynamischem Import (verhindert Next.js Server-Crash)
+  // Simulation Upload + KI-Erkennung
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsUploading(true);
+    const file = files[0];
+
+    setTimeout(() => {
+      const newDoc: UploadedDocument = {
+        id: `doc-${Date.now()}`,
+        fileName: file.name,
+        fileSize: `${(file.size / (1024 * 1024)).toFixed(2)} MB`,
+        uploadDate: new Date().toLocaleDateString("de-DE"),
+        status: "ready",
+        aiData: {
+          category: file.name.toLowerCase().includes("heiz")
+            ? "Heizenergie / Gas / Fernwärme"
+            : file.name.toLowerCase().includes("müll")
+            ? "Abfallentsorgung"
+            : "Reinigung (Fremdfirma)",
+          amount: Math.floor(Math.random() * 800) + 150,
+          suggestedKey: "Wohnfläche (m²)",
+          type: file.name.toLowerCase().includes("heiz") ? "warm" : "cold",
+          invoiceDate: new Date().toLocaleDateString("de-DE"),
+          creditor: "Beispiel Dienstleister AG",
+        },
+      };
+
+      setDocuments((prev) => [newDoc, ...prev]);
+      setIsUploading(false);
+      setSelectedDocForImport(newDoc);
+    }, 1500);
+  };
+
+  // KI-Daten in Kostenliste übernehmen
+  const handleImportToCosts = (doc: UploadedDocument) => {
+    if (!doc.aiData) return;
+
+    const existingIndex = costs.findIndex((c) => c.category === doc.aiData?.category);
+
+    if (existingIndex !== -1) {
+      const updated = [...costs];
+      updated[existingIndex] = {
+        ...updated[existingIndex],
+        amount: doc.aiData.amount,
+        key: doc.aiData.suggestedKey,
+        active: true,
+      };
+      setCosts(updated);
+    } else {
+      setCosts((prev) => [
+        ...prev,
+        {
+          id: `cost-${Date.now()}`,
+          active: true,
+          category: doc.aiData!.category,
+          key: doc.aiData!.suggestedKey,
+          amount: doc.aiData!.amount,
+          type: doc.aiData!.type,
+        },
+      ]);
+    }
+
+    setDocuments((prev) =>
+      prev.map((d) => (d.id === doc.id ? { ...d, status: "imported" } : d))
+    );
+    setSelectedDocForImport(null);
+  };
+
   const generatePDF = async () => {
     if (typeof window === "undefined") return;
     if (!selectedProperty || !selectedTenant) {
@@ -267,7 +368,7 @@ export function OperatingCostsTab({ properties = [], units = [], tenants = [] }:
               subTab === "belege" ? "bg-white shadow-sm text-slate-900" : "text-slate-600 hover:text-slate-900"
             }`}
           >
-            📁 Belege
+            📁 Belege & KI-Import
           </button>
         </div>
       </div>
@@ -508,10 +609,178 @@ export function OperatingCostsTab({ properties = [], units = [], tenants = [] }:
         </div>
       )}
 
-      {/* SUBTAB 3: Belege */}
+      {/* SUBTAB 3: Belege & KI-Import */}
       {subTab === "belege" && (
-        <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-sm text-center text-slate-500">
-          📂 Hier können Belege und Rechnungen für {selectedProperty?.name || "Objekt"} hochgeladen und verwaltet werden.
+        <div className="space-y-6">
+          {/* Upload Dropzone */}
+          <div className="bg-white p-6 rounded-xl border border-dashed border-slate-300 text-center hover:border-blue-400 transition-colors">
+            <div className="max-w-md mx-auto space-y-3">
+              <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto text-xl font-bold">
+                ✨
+              </div>
+              <div>
+                <h4 className="font-bold text-slate-900 text-sm">Belege per KI erfassen & analysieren</h4>
+                <p className="text-slate-500 text-[11px]">
+                  Lade Rechnungen (PDF, JPG, PNG) hoch. Die KI erkennt Kostenart, Betrag und Rechnungssteller automatisch.
+                </p>
+              </div>
+
+              <label className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-2 rounded-lg cursor-pointer transition-colors text-xs shadow-sm">
+                <span>📂 Datei auswählen</span>
+                <input
+                  type="file"
+                  accept="application/pdf,image/*"
+                  onChange={handleFileUpload}
+                  className="hidden"
+                />
+              </label>
+
+              {isUploading && (
+                <p className="text-blue-600 font-medium text-xs animate-pulse">
+                  🤖 KI analysiert Belegdaten... Bitte einen Moment Geduld.
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* KI-Übernahme-Assistent Modal/Card */}
+          {selectedDocForImport && selectedDocForImport.aiData && (
+            <div className="bg-emerald-50/80 p-5 rounded-xl border border-emerald-200 shadow-sm space-y-4">
+              <div className="flex justify-between items-start">
+                <div>
+                  <span className="bg-emerald-600 text-white px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider">
+                    ✨ KI-Erkennung bereit
+                  </span>
+                  <h4 className="font-bold text-slate-900 text-sm mt-1">
+                    Übernahme-Assistent: {selectedDocForImport.fileName}
+                  </h4>
+                  <p className="text-slate-600 text-[11px]">
+                    Kreditor: {selectedDocForImport.aiData.creditor} | Rechnungsdatum: {selectedDocForImport.aiData.invoiceDate}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setSelectedDocForImport(null)}
+                  className="text-slate-400 hover:text-slate-600 font-bold text-sm"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-white p-3 rounded-lg border border-emerald-100">
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-500 block">Kostenart (Erkannt)</label>
+                  <input
+                    type="text"
+                    value={selectedDocForImport.aiData.category}
+                    onChange={(e) =>
+                      setSelectedDocForImport({
+                        ...selectedDocForImport,
+                        aiData: { ...selectedDocForImport.aiData!, category: e.target.value },
+                      })
+                    }
+                    className="w-full rounded border border-slate-200 p-1 font-semibold text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-500 block">Verteilerschlüssel</label>
+                  <select
+                    value={selectedDocForImport.aiData.suggestedKey}
+                    onChange={(e) =>
+                      setSelectedDocForImport({
+                        ...selectedDocForImport,
+                        aiData: { ...selectedDocForImport.aiData!, suggestedKey: e.target.value },
+                      })
+                    }
+                    className="w-full rounded border border-slate-200 p-1 font-medium text-xs bg-white"
+                  >
+                    <option value="Wohnfläche (m²)">Wohnfläche (m²)</option>
+                    <option value="Anteile (1000stel)">Anteile (1000stel)</option>
+                    <option value="Personen / Einheiten">Personen / Einheiten</option>
+                    <option value="Direktzuordnung">Direktzuordnung</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-500 block">Rechnungsbetrag (€)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={selectedDocForImport.aiData.amount}
+                    onChange={(e) =>
+                      setSelectedDocForImport({
+                        ...selectedDocForImport,
+                        aiData: {
+                          ...selectedDocForImport.aiData!,
+                          amount: parseFloat(e.target.value) || 0,
+                        },
+                      })
+                    }
+                    className="w-full rounded border border-slate-200 p-1 font-bold text-xs text-right text-emerald-700"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => setSelectedDocForImport(null)}
+                  className="px-3 py-1.5 rounded text-slate-600 hover:bg-slate-100 font-semibold"
+                >
+                  Abbrechen
+                </button>
+                <button
+                  onClick={() => handleImportToCosts(selectedDocForImport)}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 rounded-lg font-bold shadow-sm transition-all flex items-center gap-1.5"
+                >
+                  ⚡ In Abrechnung übernehmen & Gesamtkosten aktualisieren
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Belegliste */}
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-3">
+            <h4 className="font-bold text-slate-900 text-sm border-b border-slate-100 pb-2">
+              Hochgeladene Dokumente ({selectedProperty?.name || "Objekt"})
+            </h4>
+
+            {documents.length === 0 ? (
+              <p className="text-slate-400 text-center py-4">Noch keine Belege für diese Abrechnung hochgeladen.</p>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {documents.map((doc) => (
+                  <div key={doc.id} className="py-3 flex items-center justify-between hover:bg-slate-50/50 px-2 rounded">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 bg-slate-100 rounded flex items-center justify-center font-bold text-slate-500">
+                        📄
+                      </div>
+                      <div>
+                        <div className="font-semibold text-slate-800">{doc.fileName}</div>
+                        <div className="text-[11px] text-slate-400">
+                          {doc.fileSize} • Hochgeladen am {doc.uploadDate}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      {doc.status === "imported" ? (
+                        <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-[11px] font-semibold border border-slate-200">
+                          ✓ In Abrechnung übernommen
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => setSelectedDocForImport(doc)}
+                          className="bg-blue-50 text-blue-700 hover:bg-blue-100 px-3 py-1 rounded-md font-semibold text-[11px] border border-blue-200 transition-colors"
+                        >
+                          ✨ Übernahme-Assistent öffnen
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
