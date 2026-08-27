@@ -11,25 +11,38 @@ interface Props {
   tenants: Tenant[];
 }
 
+export type CostCategoryType = "cold" | "warm" | "non_reclaimable";
+
 interface CostRow {
   id: string;
   active: boolean;
   category: string;
   key: string;
   amount: number;
+  type: CostCategoryType;
 }
 
 const DEFAULT_COST_ITEMS: Omit<CostRow, "id">[] = [
-  { active: true, category: "Abfallentsorgung", key: "Anteile (1000stel)", amount: 1310.4 },
-  { active: true, category: "Oberflächenwasser", key: "Wohnfläche (m²)", amount: 210.0 },
-  { active: true, category: "Straßenreinigung", key: "Wohnfläche (m²)", amount: 150.0 },
-  { active: true, category: "Gebäudehaftpflichtversicherung", key: "Wohnfläche (m²)", amount: 320.0 },
-  { active: true, category: "Geb.-Vers. Leitungswasser/Sturm", key: "Wohnfläche (m²)", amount: 780.0 },
-  { active: true, category: "Glasbruchversicherung", key: "Wohnfläche (m²)", amount: 120.0 },
-  { active: true, category: "Strom (Beleuchtung)", key: "Personen / Einheiten", amount: 190.0 },
-  { active: true, category: "Gartenpflege (Fremdfirma)", key: "Wohnfläche (m²)", amount: 850.0 },
-  { active: true, category: "Reinigung (Fremdfirma)", key: "Wohnfläche (m²)", amount: 1200.0 },
-  { active: true, category: "Hausmeister (Fremdfirma)", key: "Wohnfläche (m²)", amount: 1500.0 },
+  // Kalte Betriebskosten
+  { active: true, category: "Abfallentsorgung", key: "Anteile (1000stel)", amount: 1310.4, type: "cold" },
+  { active: true, category: "Oberflächenwasser", key: "Wohnfläche (m²)", amount: 210.0, type: "cold" },
+  { active: true, category: "Straßenreinigung", key: "Wohnfläche (m²)", amount: 150.0, type: "cold" },
+  { active: true, category: "Gebäudehaftpflichtversicherung", key: "Wohnfläche (m²)", amount: 320.0, type: "cold" },
+  { active: true, category: "Geb.-Vers. Leitungswasser/Sturm", key: "Wohnfläche (m²)", amount: 780.0, type: "cold" },
+  { active: true, category: "Glasbruchversicherung", key: "Wohnfläche (m²)", amount: 120.0, type: "cold" },
+  { active: true, category: "Strom (Beleuchtung)", key: "Personen / Einheiten", amount: 190.0, type: "cold" },
+  { active: true, category: "Gartenpflege (Fremdfirma)", key: "Wohnfläche (m²)", amount: 850.0, type: "cold" },
+  { active: true, category: "Reinigung (Fremdfirma)", key: "Wohnfläche (m²)", amount: 1200.0, type: "cold" },
+  { active: true, category: "Hausmeister (Fremdfirma)", key: "Wohnfläche (m²)", amount: 1500.0, type: "cold" },
+
+  // Warme Betriebskosten
+  { active: true, category: "Heizenergie / Gas / Fernwärme", key: "Wohnfläche (m²)", amount: 2450.0, type: "warm" },
+  { active: true, category: "Warmwasseraufbereitung", key: "Wohnfläche (m²)", amount: 890.0, type: "warm" },
+  { active: true, category: "Abrechnungsdienstleister (z.B. Techem/Ista)", key: "Direktzuordnung", amount: 340.0, type: "warm" },
+
+  // Nicht umlagefähig
+  { active: false, category: "Verwaltungskosten", key: "Direktzuordnung", amount: 600.0, type: "non_reclaimable" },
+  { active: false, category: "Instandhaltungsrücklage / Reparaturen", key: "Direktzuordnung", amount: 1200.0, type: "non_reclaimable" },
 ];
 
 export function OperatingCostsTab({ properties, units, tenants }: Props) {
@@ -51,8 +64,9 @@ export function OperatingCostsTab({ properties, units, tenants }: Props) {
     .filter((u) => u.property_id === selectedPropertyId)
     .reduce((sum, u) => sum + (u.size_sqm || 0), 0) || 1;
 
-  const activeCosts = costs.filter((c) => c.active);
-  const totalCosts = activeCosts.reduce((sum, item) => sum + item.amount, 0);
+  const activeReclaimableCosts = costs.filter((c) => c.active && c.type !== "non_reclaimable");
+  const totalCosts = activeReclaimableCosts.reduce((sum, item) => sum + item.amount, 0);
+  
   const tenantSqm = selectedUnit?.size_sqm || 0;
   const sqmRatio = tenantSqm / totalPropertySqm;
 
@@ -77,6 +91,10 @@ export function OperatingCostsTab({ properties, units, tenants }: Props) {
     setCosts(costs.map((c) => ({ ...c, key })));
   }
 
+  function handleSaveAndProceed() {
+    setSubTab("split");
+  }
+
   function generatePDF() {
     if (!selectedProperty || !selectedTenant || !selectedUnit) {
       alert("Bitte wählen Sie ein Objekt und einen Mieter aus.");
@@ -94,7 +112,7 @@ export function OperatingCostsTab({ properties, units, tenants }: Props) {
     doc.text(`Mieter: ${selectedTenant.first_name} ${selectedTenant.last_name}`, 14, 34);
     doc.text(`Einheit: ${selectedUnit.unit_number} (${tenantSqm} m²)`, 14, 40);
 
-    const tableData = activeCosts.map((item) => [
+    const tableData = activeReclaimableCosts.map((item) => [
       item.category,
       item.key,
       `${item.amount.toFixed(2)} €`,
@@ -123,6 +141,72 @@ export function OperatingCostsTab({ properties, units, tenants }: Props) {
 
     doc.save(`Betriebskosten_${year}_${selectedTenant.last_name}.pdf`);
   }
+
+  const renderCostTable = (title: string, categoryType: CostCategoryType, description?: string) => {
+    const sectionCosts = costs.filter((c) => c.type === categoryType);
+    const sectionTotal = sectionCosts.filter((c) => c.active).reduce((sum, c) => sum + c.amount, 0);
+
+    return (
+      <div className="space-y-2 pt-2">
+        <div className="flex justify-between items-end border-b border-slate-200 pb-1">
+          <div>
+            <h4 className="font-bold text-slate-800 text-xs">{title}</h4>
+            {description && <p className="text-[11px] text-slate-400">{description}</p>}
+          </div>
+          <span className="text-xs font-semibold text-slate-600">
+            Zwischensumme: {sectionTotal.toFixed(2)} €
+          </span>
+        </div>
+
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="border-b border-slate-100 text-slate-400 font-semibold text-[11px]">
+              <th className="py-1.5 w-12">Aktiv</th>
+              <th className="py-1.5">Kostenart</th>
+              <th className="py-1.5 w-56">Verteilerschlüssel</th>
+              <th className="py-1.5 text-right w-40">Gesamtkosten (€)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sectionCosts.map((item) => (
+              <tr key={item.id} className="border-b border-slate-50 hover:bg-slate-50/50">
+                <td className="py-2">
+                  <input
+                    type="checkbox"
+                    checked={item.active}
+                    onChange={() => toggleCost(item.id)}
+                    className="rounded border-slate-300 text-blue-600 focus:ring-0 cursor-pointer"
+                  />
+                </td>
+                <td className="py-2 font-medium text-slate-800">{item.category}</td>
+                <td className="py-2">
+                  <select
+                    value={item.key}
+                    onChange={(e) => updateKey(item.id, e.target.value)}
+                    className="w-full rounded border border-slate-200 p-1 bg-white text-xs"
+                  >
+                    <option value="Wohnfläche (m²)">Wohnfläche (m²)</option>
+                    <option value="Anteile (1000stel)">Anteile (1000stel)</option>
+                    <option value="Personen / Einheiten">Personen / Einheiten</option>
+                    <option value="Direktzuordnung">Direktzuordnung</option>
+                  </select>
+                </td>
+                <td className="py-2 text-right">
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={item.amount}
+                    onChange={(e) => updateAmount(item.id, parseFloat(e.target.value) || 0)}
+                    className="w-32 rounded border border-slate-200 p-1 text-right font-semibold text-xs"
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
 
   return (
     <div className="p-6 space-y-6 text-xs text-slate-700">
@@ -200,7 +284,7 @@ export function OperatingCostsTab({ properties, units, tenants }: Props) {
 
       {/* SUBTAB 1: Gesamtkosten erfassen */}
       {subTab === "costs" && (
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-6">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <h3 className="font-bold text-slate-900 text-sm">
               Bewirtschaftung für: <span className="text-blue-600">{selectedProperty?.name}</span> ({year})
@@ -219,60 +303,28 @@ export function OperatingCostsTab({ properties, units, tenants }: Props) {
             </div>
           </div>
 
-          <p className="font-semibold text-slate-500 pt-1">
-            Bewirtschaftung (Kosten) – Umlagefähige kalte Betriebskosten
-          </p>
+          {/* Sektion 1: Kalte Betriebskosten */}
+          {renderCostTable("Umlagefähige kalte Betriebskosten", "cold")}
 
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-slate-200 text-slate-400 font-semibold text-[11px]">
-                <th className="py-2 w-12">Aktiv</th>
-                <th className="py-2">Kostenart</th>
-                <th className="py-2 w-56">Verteilerschlüssel</th>
-                <th className="py-2 text-right w-40">Gesamtkosten (€)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {costs.map((item) => (
-                <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50/50">
-                  <td className="py-2.5">
-                    <input
-                      type="checkbox"
-                      checked={item.active}
-                      onChange={() => toggleCost(item.id)}
-                      className="rounded border-slate-300 text-blue-600 focus:ring-0"
-                    />
-                  </td>
-                  <td className="py-2.5 font-medium text-slate-800">{item.category}</td>
-                  <td className="py-2.5">
-                    <select
-                      value={item.key}
-                      onChange={(e) => updateKey(item.id, e.target.value)}
-                      className="w-full rounded border border-slate-200 p-1 bg-white"
-                    >
-                      <option value="Wohnfläche (m²)">Wohnfläche (m²)</option>
-                      <option value="Anteile (1000stel)">Anteile (1000stel)</option>
-                      <option value="Personen / Einheiten">Personen / Einheiten</option>
-                      <option value="Direktzuordnung">Direktzuordnung</option>
-                    </select>
-                  </td>
-                  <td className="py-2.5 text-right">
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={item.amount}
-                      onChange={(e) => updateAmount(item.id, parseFloat(e.target.value) || 0)}
-                      className="w-32 rounded border border-slate-200 p-1 text-right font-semibold"
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          {/* Sektion 2: Warme Betriebskosten */}
+          {renderCostTable("Warme Betriebskosten (Heizung & Warmwasser)", "warm")}
 
-          <div className="flex justify-between items-center pt-3 border-t border-slate-100 font-bold">
-            <span>Gesamtsumme Umlagefähig:</span>
-            <span className="text-sm text-slate-900">{totalCosts.toFixed(2)} €</span>
+          {/* Sektion 3: Nicht umlagefähige Kosten */}
+          {renderCostTable("Nicht umlagefähige Betriebskosten", "non_reclaimable", "Diese Kosten werden nicht auf die Mieter umgelegt")}
+
+          {/* Unterer Aktionsbereich / Speichern & Weiter Button */}
+          <div className="flex flex-col sm:flex-row justify-between items-center pt-5 border-t border-slate-200 gap-4">
+            <div>
+              <span className="text-xs font-semibold text-slate-500 block">Gesamtsumme Umlagefähig:</span>
+              <span className="text-base font-bold text-slate-900">{totalCosts.toFixed(2)} €</span>
+            </div>
+            
+            <button
+              onClick={handleSaveAndProceed}
+              className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-5 py-2.5 rounded-lg shadow-sm transition-all flex items-center gap-2 text-xs"
+            >
+              💾 Speichern & zur Aufteilung nach Wohnung ➔
+            </button>
           </div>
         </div>
       )}
@@ -281,9 +333,9 @@ export function OperatingCostsTab({ properties, units, tenants }: Props) {
       {subTab === "split" && (
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <h3 className="font-bold text-slate-900 text-sm">Abrechnung pro Mieter generieren</h3>
+            <h3 className="font-bold text-slate-900 text-sm">Abrechnung pro Mieter & Wohnung zuordnen</h3>
             <div className="flex items-center gap-2">
-              <span className="font-semibold text-slate-500">Mieter wählen:</span>
+              <span className="font-semibold text-slate-500">Mieter / Einheit wählen:</span>
               <select
                 value={selectedTenantId}
                 onChange={(e) => setSelectedTenantId(e.target.value)}
@@ -291,16 +343,16 @@ export function OperatingCostsTab({ properties, units, tenants }: Props) {
               >
                 {tenants.map((t) => (
                   <option key={t.id} value={t.id}>
-                    {t.first_name} {t.last_name}
+                    {t.first_name} {t.last_name} ({units.find((u) => u.id === t.unit_id)?.unit_number || "Keine Einheit"})
                   </option>
                 ))}
               </select>
             </div>
           </div>
 
-          <div className="bg-slate-50 p-4 rounded-lg space-y-2 text-xs">
+          <div className="bg-slate-50 p-4 rounded-lg space-y-2 text-xs border border-slate-100">
             <p><strong>Mieter:</strong> {selectedTenant?.first_name} {selectedTenant?.last_name}</p>
-            <p><strong>Wohnfläche Mieter:</strong> {tenantSqm} m² von {totalPropertySqm} m² ({((tenantSqm/totalPropertySqm)*100).toFixed(1)} %)</p>
+            <p><strong>Wohnfläche Mieter:</strong> {tenantSqm} m² von {totalPropertySqm} m² ({((tenantSqm / totalPropertySqm) * 100).toFixed(1)} %)</p>
             <p><strong>Anteilige Gesamtkosten:</strong> {tenantShareTotal.toFixed(2)} €</p>
             <p><strong>Geleistete Vorauszahlungen (12 Monate):</strong> {annualAdvance.toFixed(2)} €</p>
             <p className={`font-bold text-sm ${balance >= 0 ? "text-red-600" : "text-emerald-600"}`}>
@@ -308,10 +360,16 @@ export function OperatingCostsTab({ properties, units, tenants }: Props) {
             </p>
           </div>
 
-          <div className="flex justify-end pt-2">
+          <div className="flex justify-between items-center pt-2">
+            <button
+              onClick={() => setSubTab("costs")}
+              className="text-slate-600 hover:text-slate-800 font-semibold text-xs"
+            >
+              ← Zurück zur Gesamtkostenerfassung
+            </button>
             <button
               onClick={generatePDF}
-              className="bg-blue-600 hover:bg-blue-500 text-white font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
+              className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-2 rounded-lg transition-colors flex items-center gap-2 text-xs"
             >
               📄 Abrechnung als PDF herunterladen
             </button>
