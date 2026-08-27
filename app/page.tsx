@@ -49,7 +49,7 @@ interface Tenant {
   warm_rent: number;
   start_date?: string;
   end_date?: string;
-  units?: { unit_number: string; properties?: { name: string } };
+  units?: { unit_number: string; property_id: string; properties?: { name: string } };
 }
 
 interface Payment {
@@ -98,7 +98,7 @@ export default function Home() {
   // Globaler Verteilerschlüssel für alle Positionen oben
   const [globalKeyType, setGlobalKeyType] = useState<string>("Wohnfläche (m²)");
 
-  // Gespeicherte Abrechnungsdaten (damit sie nicht verschwinden)
+  // Gespeicherte Abrechnungsdaten
   const [savedAbrechnungStatus, setSavedAbrechnungStatus] = useState<string>("Nicht gespeichert / Entwurf");
   const [lastSavedData, setLastSavedData] = useState<any>(null);
 
@@ -157,14 +157,8 @@ export default function Home() {
   const [newOperatingCost, setNewOperatingCost] = useState({
     property_id: "",
     unit_id: "",
-    tenant_id: "",
     kategorie: "Abfallentsorgung",
     betrag: "",
-    rechnungsdatum: new Date().toISOString().split("T")[0],
-    zeitraum_von: "",
-    zeitraum_bis: "",
-    abrechnungsjahr: "2025",
-    ist_zwischenabrechnung: false,
   });
 
   useEffect(() => {
@@ -183,11 +177,11 @@ export default function Home() {
     }
 
     const { data: unitsData } = await supabase.from("units").select("*, properties(name)");
-    if (unitsData) setUnits(unitsData as Unit[] );
+    if (unitsData) setUnits(unitsData as Unit[]);
 
     const { data: tenantsData } = await supabase
       .from("tenants")
-      .select("*, units(unit_number, properties(name))");
+      .select("*, units(unit_number, property_id, properties(name))");
     if (tenantsData) setTenants(tenantsData as Tenant[]);
 
     const { data: paymentsData } = await supabase
@@ -359,7 +353,7 @@ export default function Home() {
     e.preventDefault();
     if (!newPayment.tenant_id || !newPayment.amount) return;
 
-    const { error } = await supabase.payments.insert([
+    const { error } = await supabase.from("payments").insert([
       {
         tenant_id: newPayment.tenant_id,
         amount: Number(newPayment.amount),
@@ -390,7 +384,7 @@ export default function Home() {
     e.preventDefault();
     if (!newOperatingCost.property_id || !newOperatingCost.betrag) return;
     
-    alert("Beleg/Rechnung erfolgreich hochgeladen und erfasst!");
+    alert("Beleg/Rechnung für das ausgewählte Gebäude erfolgreich erfasst!");
     setShowAddOperatingCostModal(false);
   }
 
@@ -414,6 +408,10 @@ export default function Home() {
 
     return yearMatches && tenantMatches && statusMatches;
   });
+
+  // Einheiten nur für das aktuell im BK-Bereich ausgewählte Gebäude filtern!
+  const currentPropertyUnits = units.filter((u) => u.property_id === selectedPropertyForBk);
+  const currentPropertyObj = properties.find((p) => p.id === selectedPropertyForBk);
 
   return (
     <div className="min-h-screen bg-[#f5f7fb] text-[#1d2939]">
@@ -553,7 +551,7 @@ export default function Home() {
                       <thead className="border-b border-[#e7ebf2] bg-gray-50 text-xs text-gray-500">
                         <tr>
                           <th className="p-4">Einheit / Nr.</th>
-                          <th className="p-4">Objekt</th>
+                          <th className="p-4">Objekt / Gebäude</th>
                           <th className="p-4">Fläche</th>
                           <th className="p-4">Zimmer</th>
                           <th className="p-4">Status</th>
@@ -563,7 +561,7 @@ export default function Home() {
                         {units.map((u) => (
                           <tr key={u.id} className="hover:bg-gray-50">
                             <td className="p-4 font-semibold">{u.unit_number}</td>
-                            <td className="p-4 text-gray-600">{u.properties?.name || "-"}</td>
+                            <td className="p-4 text-gray-600 font-medium">{u.properties?.name || "-"}</td>
                             <td className="p-4 text-gray-600">{u.size_sqm} m²</td>
                             <td className="p-4 text-gray-600">{u.rooms}</td>
                             <td className="p-4">
@@ -757,16 +755,16 @@ export default function Home() {
               </div>
             )}
 
-            {/* BETRIEBSKOSTEN (ERWEITERT & GESPEICHERT) */}
+            {/* BETRIEBSKOSTEN (GEBÄUDE-SPEZIFISCH & GETRENNT) */}
             {activePage === "Betriebskosten" && (
               <div>
                 <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
                   <div>
-                    <h2 className="text-[21px] font-bold">Betriebskosten & Abrechnung</h2>
-                    <p className="text-sm text-gray-500">Erstellen Sie die Jahresabrechnung oder verwalten Sie die zugehörigen Belege.</p>
+                    <h2 className="text-[21px] font-bold">Betriebskosten & Gebäude-Abrechnung</h2>
+                    <p className="text-sm text-gray-500">Erfassen Sie Gesamtkosten je Gebäude und prüfen Sie die Aufteilung auf die zugehörigen Wohnungen.</p>
                   </div>
 
-                  {/* UNTERMENÜ-REITER INKL. EINHEITENAUFTEILUNG */}
+                  {/* UNTERMENÜ-REITER */}
                   <div className="flex rounded-xl bg-gray-200/70 p-1">
                     <button
                       onClick={() => setBkSubTab("abrechnung")}
@@ -774,7 +772,7 @@ export default function Home() {
                         bkSubTab === "abrechnung" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"
                       }`}
                     >
-                      📊 Jahresabrechnung
+                      📊 Gesamtkosten erfassen
                     </button>
                     <button
                       onClick={() => setBkSubTab("einheitenaufteilung")}
@@ -782,7 +780,7 @@ export default function Home() {
                         bkSubTab === "einheitenaufteilung" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"
                       }`}
                     >
-                      🏢 Aufteilung nach Vermietungseinheit {lastSavedData ? "🟢" : ""}
+                      🏢 Aufteilung nach Wohnung ({currentPropertyObj?.name || "Objekt"}) {lastSavedData ? "🟢" : ""}
                     </button>
                     <button
                       onClick={() => setBkSubTab("belege")}
@@ -795,18 +793,18 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* FILTER / OBJEKT-AUSWAHL */}
+                {/* GEBÄUDE-AUSWAHL (ZENTRAL FÜR BEIDE ANSICHTEN) */}
                 <div className="mb-6 flex flex-wrap gap-4 items-center justify-between rounded-xl border border-[#e7ebf2] bg-white p-4 shadow-sm">
                   <div className="flex flex-wrap gap-4 items-center">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold text-gray-500">Gebäude / Objekt:</span>
+                      <span className="text-xs font-bold text-gray-700">📍 Aktuelles Gebäude / Objekt:</span>
                       <select
                         value={selectedPropertyForBk}
                         onChange={(e) => setSelectedPropertyForBk(e.target.value)}
-                        className="rounded-lg border border-gray-200 p-2 text-xs bg-gray-50 font-medium"
+                        className="rounded-lg border border-blue-300 bg-blue-50/50 p-2 text-xs font-bold text-blue-900"
                       >
                         {properties.map((p) => (
-                          <option key={p.id} value={p.id}>{p.name} ({p.city})</option>
+                          <option key={p.id} value={p.id}>{p.name} — {p.city} ({p.address})</option>
                         ))}
                       </select>
                     </div>
@@ -830,19 +828,21 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* UNTERMENÜ 1: JAHRESABRECHNUNG */}
+                {/* UNTERMENÜ 1: GESAMTKOSTEN ERFASSEN */}
                 {bkSubTab === "abrechnung" && (
                   <div className="space-y-6">
                     <div className="rounded-xl border border-[#e7ebf2] bg-white p-6 shadow-sm">
                       <div className="flex justify-between items-center mb-4 border-b pb-3">
-                        <h3 className="text-base font-bold text-gray-800">Übersicht Gebäude-Betriebskosten ({bkYear})</h3>
+                        <h3 className="text-base font-bold text-gray-800">
+                          Gesamtkosten erfassen für: <span className="text-blue-600">{currentPropertyObj?.name}</span> ({bkYear})
+                        </h3>
                         <span className="text-xs bg-blue-50 text-blue-700 px-2.5 py-1 rounded-full font-semibold">Stichtag: 31.12.{bkYear}</span>
                       </div>
 
                       {/* GLOBALER VERTEILERSCHLÜSSEL-UMSCHALTER OBEN */}
                       <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-gray-50 p-4 border border-gray-200">
                         <div className="text-xs font-bold text-gray-700">
-                          ⚡ Globaler Verteilerschlüssel (ändert alle Schlüssel gleichzeitig):
+                          ⚡ Globaler Verteilerschlüssel für dieses Gebäude (ändert alle Positionen):
                         </div>
                         <div className="flex items-center gap-2">
                           <select
@@ -861,7 +861,7 @@ export default function Home() {
                       </div>
 
                       <div className="overflow-x-auto space-y-8">
-                        {/* I. Bewirtschaftung (Kosten) - Umlagefähige kalte Betriebskosten */}
+                        {/* I. Umlagefähige kalte Betriebskosten */}
                         <div>
                           <h4 className="text-sm font-bold text-gray-900 border-b border-gray-200 pb-2 mb-3">
                             I. Bewirtschaftung (Kosten) – Umlagefähige kalte Betriebskosten
@@ -871,7 +871,7 @@ export default function Home() {
                               <tr>
                                 <th className="p-2.5 w-10 text-center">Aktiv</th>
                                 <th className="p-2.5">Kostenart</th>
-                                <th className="p-2.5">Verteilerschlüssel</th>
+                                <th className="p-2.5">Verteilerschlüssel wählen</th>
                                 <th className="p-2.5 text-right">Gesamtkosten (€)</th>
                               </tr>
                             </thead>
@@ -886,13 +886,13 @@ export default function Home() {
                               <CostItemRow label="Gartenpflege (Fremdfirma)" defaultActive={true} overrideKey={globalKeyType} defaultAmount="850.00" />
                               <CostItemRow label="Reinigung (Fremdfirma)" defaultActive={true} overrideKey={globalKeyType} defaultAmount="1200.00" />
                               <CostItemRow label="Hausmeister (Fremdfirma)" defaultActive={true} overrideKey={globalKeyType} defaultAmount="1500.00" />
-                              <CostItemRow label="Wartung RWM" defaultActive={true} overrideKey={globalKeyType} defaultAmount="250.00" />
+                              <CostItemRow label="Wartung RWM" defaultActive={true} overrideKey="Stück" defaultAmount="250.00" />
                               <CostItemRow label="Kosten Direktzuordnung" defaultActive={true} overrideKey="Pauschal" defaultAmount="0.00" />
                             </tbody>
                           </table>
                         </div>
 
-                        {/* II. Umlagefähige warme Betriebskosten */}
+                        {/* II. Warme Betriebskosten */}
                         <div>
                           <h4 className="text-sm font-bold text-gray-900 border-b border-gray-200 pb-2 mb-3">
                             II. Umlagefähige warme Betriebskosten
@@ -902,7 +902,7 @@ export default function Home() {
                               <tr>
                                 <th className="p-2.5 w-10 text-center">Aktiv</th>
                                 <th className="p-2.5">Kostenart</th>
-                                <th className="p-2.5">Verteilerschlüssel</th>
+                                <th className="p-2.5">Verteilerschlüssel wählen</th>
                                 <th className="p-2.5 text-right">Gesamtkosten (€)</th>
                               </tr>
                             </thead>
@@ -913,11 +913,11 @@ export default function Home() {
                           </table>
                         </div>
 
-                        {/* III. Nicht umlagefähige Positionen (NUR Vermieteransicht) */}
+                        {/* III. Nicht umlagefähige Positionen (Vermieteransicht) */}
                         <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-4">
                           <div className="flex items-center justify-between mb-3 border-b border-amber-200 pb-2">
                             <h4 className="text-sm font-bold text-amber-900">
-                              🔒 Nicht umlagefähige Positionen (Nur für Vermieter / Dashboard sichtbar)
+                              🔒 Nicht umlagefähige Positionen (Nur für Vermieter / Dashboard)
                             </h4>
                             <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-semibold uppercase">Vermieter-Ansicht</span>
                           </div>
@@ -926,59 +926,14 @@ export default function Home() {
                               <tr>
                                 <th className="p-2.5 w-10 text-center">Aktiv</th>
                                 <th className="p-2.5">Kostenart</th>
-                                <th className="p-2.5">Verteilerschlüssel</th>
+                                <th className="p-2.5">Verteilerschlüssel wählen</th>
                                 <th className="p-2.5 text-right">Gesamtkosten (€)</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-amber-200 text-xs">
                               <CostItemRow label="Rauchwarnmelder Miete" defaultActive={true} overrideKey="Stück" defaultAmount="120.00" />
                               <CostItemRow label="Reparaturen" defaultActive={true} overrideKey="Anteile (1000stel)" defaultAmount="450.00" />
-                              <CostItemRow label="Kontoführungskosten (Giro)" defaultActive={true} overrideKey="Pauschal" defaultAmount="85.00" />
                               <CostItemRow label="Verwalterentgelt" defaultActive={true} overrideKey="Pauschal" defaultAmount="960.00" />
-                              <CostItemRow label="Verwalterentgelt (gem. Vereinb.)" defaultActive={false} overrideKey="Pauschal" defaultAmount="0.00" />
-                            </tbody>
-                          </table>
-                        </div>
-
-                        {/* IV. Bewirtschaftung (Erträge) */}
-                        <div>
-                          <h4 className="text-sm font-bold text-gray-900 border-b border-gray-200 pb-2 mb-3">
-                            III. Bewirtschaftung (Erträge) – Automatische Guthaben-Ausweisung
-                          </h4>
-                          <table className="w-full text-left text-sm">
-                            <thead className="bg-gray-50 text-xs text-gray-500">
-                              <tr>
-                                <th className="p-2.5">Ertragsart / Ausweis</th>
-                                <th className="p-2.5 text-right">Betrag (€)</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-[#e7ebf2] text-xs">
-                              <tr>
-                                <td className="p-2.5 font-medium text-gray-700">Umlagefähige kalte Betriebskosten (Gutschriften / Rückzahlungen)</td>
-                                <td className="p-2.5 text-right font-semibold text-green-600">0,00 € (Auto)</td>
-                              </tr>
-                            </tbody>
-                          </table>
-                        </div>
-
-                        {/* V. Rücklage (NUR Vermieteransicht) */}
-                        <div className="rounded-xl border border-blue-200 bg-blue-50/30 p-4">
-                          <div className="flex items-center justify-between mb-3 border-b border-blue-200 pb-2">
-                            <h4 className="text-sm font-bold text-blue-900">
-                              🔒 IV. Rücklage – Zuführung lt. WP / Beschluss (Nur für Vermieter)
-                            </h4>
-                            <span className="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-semibold uppercase">Vermieter-Ansicht</span>
-                          </div>
-                          <table className="w-full text-left text-sm">
-                            <thead className="bg-blue-100/50 text-xs text-blue-900">
-                              <tr>
-                                <th className="p-2.5 w-10 text-center">Aktiv</th>
-                                <th className="p-2.5">Beschreibung / Rücklagen-Schlüssel</th>
-                                <th className="p-2.5 text-right">Zuführung zum 31.12.{bkYear} (€)</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-blue-200 text-xs">
-                              <CostItemRow label="Soll Rücklage (Zuführung lt. Wirtschaftsplan)" defaultActive={true} overrideKey="Anteile (1000stel)" defaultAmount="1200.00" />
                             </tbody>
                           </table>
                         </div>
@@ -987,9 +942,9 @@ export default function Home() {
                       <div className="mt-6 flex justify-end gap-3 border-t pt-4">
                         <button
                           onClick={() => {
-                            setSavedAbrechnungStatus("Als Entwurf gespeichert am " + new Date().toLocaleDateString("de-DE"));
-                            setLastSavedData({ year: bkYear, date: new Date() });
-                            alert("Abrechnung als Entwurf gespeichert! Sie können diese jetzt im Reiter 'Aufteilung nach Vermietungseinheit' einsehen.");
+                            setSavedAbrechnungStatus("Als Entwurf gespeichert für " + (currentPropertyObj?.name || "Objekt"));
+                            setLastSavedData({ year: bkYear, propertyId: selectedPropertyForBk, date: new Date() });
+                            alert("Entwurf für " + (currentPropertyObj?.name || "Objekt") + " gespeichert! Wechseln Sie nun in das Untermenü zur Aufteilung.");
                           }}
                           className="rounded-lg border border-gray-300 px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition"
                         >
@@ -997,58 +952,65 @@ export default function Home() {
                         </button>
                         <button
                           onClick={() => {
-                            setSavedAbrechnungStatus("Berechnet & Freigegeben 🚀");
-                            setLastSavedData({ year: bkYear, date: new Date() });
-                            alert("Abrechnung erfolgreich berechnet und gespeichert! Schauen Sie nun in das Untermenü 'Aufteilung nach Vermietungseinheit'.");
+                            setSavedAbrechnungStatus("Berechnet für " + (currentPropertyObj?.name || "Objekt") + " 🚀");
+                            setLastSavedData({ year: bkYear, propertyId: selectedPropertyForBk, date: new Date() });
+                            alert("Daten bestätigt! Zeige nun die Aufteilung exakt für die Wohnungen des Gebäudes '" + (currentPropertyObj?.name || "") + "'.");
                             setBkSubTab("einheitenaufteilung");
                           }}
                           className="rounded-lg bg-[#2f6fd0] px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 transition"
                         >
-                          Abrechnung erstellen & berechnen 🚀
+                          Bestätigen & Aufteilung anzeigen 🚀
                         </button>
                       </div>
                     </div>
                   </div>
                 )}
 
-                {/* UNTERMENÜ 2: AUFTEILUNG NACH VERMIETUNGSEINHEIT */}
+                {/* UNTERMENÜ 2: AUFTEILUNG NACH WOHNEINHEIT (GEBÄUDE-BEZOGEN) */}
                 {bkSubTab === "einheitenaufteilung" && (
                   <div className="space-y-6">
                     <div className="rounded-xl border border-[#e7ebf2] bg-white p-6 shadow-sm">
                       <div className="flex justify-between items-center mb-4 border-b pb-3">
-                        <h3 className="text-base font-bold text-gray-800">Aufteilung nach Vermietungseinheit ({bkYear})</h3>
-                        <span className="text-xs bg-green-50 text-green-700 px-2.5 py-1 rounded-full font-semibold">Status: Berechnet & Aktiv</span>
+                        <div>
+                          <h3 className="text-base font-bold text-gray-800">
+                            Aufteilung nach Vermietungseinheit für: <span className="text-blue-600">{currentPropertyObj?.name}</span> ({bkYear})
+                          </h3>
+                          <p className="text-xs text-gray-500 mt-0.5">Es werden ausschließlich die Wohnungen dieses spezifischen Gebäudes aufgeschlüsselt.</p>
+                        </div>
+                        <span className="text-xs bg-green-50 text-green-700 px-2.5 py-1 rounded-full font-semibold">Berechnet</span>
                       </div>
 
-                      {units.length === 0 ? (
-                        <div className="text-center py-10 text-gray-500 text-xs">Keine Einheiten im Gebäude vorhanden, um Kosten aufzuteilen.</div>
+                      {currentPropertyUnits.length === 0 ? (
+                        <div className="text-center py-10 text-gray-500 text-xs">
+                          Für das Gebäude <span className="font-bold">{currentPropertyObj?.name}</span> sind noch keine Einheiten hinterlegt. Bitte legen Sie unter dem Reiter &quot;Einheiten&quot; Wohnungen an und ordnen Sie sie diesem Gebäude zu.
+                        </div>
                       ) : (
                         <div className="overflow-x-auto">
                           <table className="w-full text-left text-sm">
                             <thead className="bg-gray-50 text-xs text-gray-500">
                               <tr>
-                                <th className="p-3">Einheit</th>
+                                <th className="p-3">Wohnung / Einheit</th>
                                 <th className="p-3">Mieter</th>
                                 <th className="p-3">Fläche (m²)</th>
                                 <th className="p-3">Kalte NK (Anteil)</th>
                                 <th className="p-3">Warme NK (Heiz/Wasser)</th>
                                 <th className="p-3 text-amber-800">Nicht umlag. (Vermieter)</th>
-                                <th className="p-3 font-bold text-right">Gesamt / Monatlich</th>
+                                <th className="p-3 font-bold text-right">Summe / Monatlich</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-[#e7ebf2] text-xs">
-                              {units.map((u) => {
+                              {currentPropertyUnits.map((u) => {
                                 const tenantForUnit = tenants.find((t) => t.unit_id === u.id);
                                 const sqm = Number(u.size_sqm) || 60;
-                                const kalteAnteil = sqm * 15.5;
-                                const warmeAnteil = sqm * 12.0;
-                                const nichtUmlag = sqm * 3.5;
+                                const kalteAnteil = sqm * 14.2;
+                                const warmeAnteil = sqm * 11.5;
+                                const nichtUmlag = sqm * 3.2;
 
                                 return (
                                   <tr key={u.id} className="hover:bg-gray-50">
                                     <td className="p-3 font-semibold">{u.unit_number}</td>
                                     <td className="p-3 text-gray-600">
-                                      {tenantForUnit ? `${tenantForUnit.first_name} ${tenantForUnit.last_name}` : "Leerstand"}
+                                      {tenantForUnit ? `${tenantForUnit.first_name} ${tenantForUnit.last_name}` : <span className="text-red-500 font-medium">Leerstand</span>}
                                     </td>
                                     <td className="p-3 text-gray-600">{sqm} m²</td>
                                     <td className="p-3 text-gray-700">{formatEuro(kalteAnteil)}</td>
@@ -1068,28 +1030,28 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* UNTERMENÜ 3: BELEGE & KI-UPLOAD */}
+                {/* UNTERMENÜ 3: BELEGE */}
                 {bkSubTab === "belege" && (
                   <div className="space-y-6">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-base font-bold text-gray-800">Eingereichte Rechnungen & Belege</h3>
+                      <h3 className="text-base font-bold text-gray-800">Belege für: {currentPropertyObj?.name}</h3>
                       <button
                         onClick={() => setShowAddOperatingCostModal(true)}
                         className="rounded-lg bg-[#2f6fd0] px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 transition"
                       >
-                        + Beleg hochladen / erfassen
+                        + Beleg für dieses Gebäude hochladen
                       </button>
                     </div>
 
                     <div className="rounded-xl border border-[#e7ebf2] bg-white p-10 text-center shadow-sm">
                       <div className="text-3xl mb-2">📂</div>
-                      <h4 className="text-sm font-bold text-gray-800">Keine Belege für diesen Zeitraum hinterlegt</h4>
-                      <p className="text-xs text-gray-500 mt-1">Nutzen Sie den KI-Upload im Dialog, um Rechnungen vollautomatisch einlesen zu lassen.</p>
+                      <h4 className="text-sm font-bold text-gray-800">Keine Belege für {currentPropertyObj?.name} hinterlegt</h4>
+                      <p className="text-xs text-gray-500 mt-1">Laden Sie Rechnungen hoch, um sie direkt diesem Gebäude zuzuordnen.</p>
                       <button
                         onClick={() => setShowAddOperatingCostModal(true)}
                         className="mt-4 rounded-lg border border-blue-600 px-4 py-2 text-xs font-semibold text-blue-600 hover:bg-blue-50 transition"
                       >
-                        Ersten Beleg hochladen
+                        Beleg hochladen
                       </button>
                     </div>
                   </div>
@@ -1107,7 +1069,7 @@ export default function Home() {
         </main>
       </div>
 
-      {/* MODAL: BELEG / RECHNUNG ERFASSEN (MIT KI-UPLOAD) */}
+      {/* MODAL: BELEG ERFASSEN */}
       {showAddOperatingCostModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
@@ -1116,49 +1078,20 @@ export default function Home() {
               <button onClick={() => setShowAddOperatingCostModal(false)} className="text-xl font-bold text-gray-400 hover:text-gray-600">&times;</button>
             </div>
 
-            <div className="mb-6 flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 p-4">
-              <div>
-                <span className="block text-sm font-semibold text-blue-900">🤖 KI-Rechnungs-Assistent</span>
-                <span className="text-xs text-blue-700">Rechnung per PDF/Foto hochladen und automatisch auslesen lassen</span>
-              </div>
-              <input
-                type="file"
-                accept="application/pdf,image/*"
-                className="cursor-pointer text-xs text-blue-800 file:mr-2 file:rounded-md file:border-0 file:bg-blue-600 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white hover:file:bg-blue-700"
-                onChange={() => alert("KI-Scanner liest Rechnung ein (Platzhalter)")}
-              />
-            </div>
-
             <form onSubmit={handleCreateOperatingCost} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-gray-700">Immobilie / Objekt</label>
-                  <select
-                    className="w-full rounded-lg border border-gray-300 p-2 text-sm"
-                    value={newOperatingCost.property_id}
-                    onChange={(e) => setNewOperatingCost({ ...newOperatingCost, property_id: e.target.value })}
-                    required
-                  >
-                    <option value="">Objekt wählen</option>
-                    {properties.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-gray-700">Wohneinheit</label>
-                  <select
-                    className="w-full rounded-lg border border-gray-300 p-2 text-sm"
-                    value={newOperatingCost.unit_id}
-                    onChange={(e) => setNewOperatingCost({ ...newOperatingCost, unit_id: e.target.value })}
-                  >
-                    <option value="">Ganzes Gebäude (Allgemeinkosten)</option>
-                    {units.map((u) => (
-                      <option key={u.id} value={u.id}>{u.unit_number} ({u.properties?.name})</option>
-                    ))}
-                  </select>
-                </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-700">Gebäude / Objekt auswählen</label>
+                <select
+                  className="w-full rounded-lg border border-gray-300 p-2 text-sm font-semibold text-blue-900 bg-blue-50"
+                  value={newOperatingCost.property_id}
+                  onChange={(e) => setNewOperatingCost({ ...newOperatingCost, property_id: e.target.value })}
+                  required
+                >
+                  <option value="">Bitte Gebäude wählen</option>
+                  {properties.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name} ({p.city})</option>
+                  ))}
+                </select>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1177,7 +1110,7 @@ export default function Home() {
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-gray-700">Betrag (€)</label>
+                  <label className="mb-1 block text-xs font-medium text-gray-700">Gesamtbetrag (€)</label>
                   <input
                     type="number"
                     step="0.01"
@@ -1202,7 +1135,7 @@ export default function Home() {
                   type="submit"
                   className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
                 >
-                  Beleg speichern
+                  Beleg für Gebäude speichern
                 </button>
               </div>
             </form>
@@ -1218,7 +1151,6 @@ function CostItemRow({ label, defaultActive, overrideKey, defaultAmount }: { lab
   const [keyType, setKeyType] = useState(overrideKey);
   const [amount, setAmount] = useState(defaultAmount);
 
-  // Synchronisiere, wenn der globale Umschalter geändert wird
   useEffect(() => {
     if (overrideKey && (overrideKey !== "Verbrauch / m²" && overrideKey !== "Stück" && overrideKey !== "Pauschal")) {
       setKeyType(overrideKey);
