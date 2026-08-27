@@ -35,7 +35,6 @@ interface Unit {
   rooms: number;
   status: string;
   properties?: { name: string };
-  // Erweiterte Schlüsselwerte pro Einheit
   persons?: number;
   shares_1000?: number;
   pieces?: number;
@@ -67,6 +66,36 @@ interface Payment {
   notes?: string;
   tenants?: { first_name: string; last_name: string; units?: { unit_number: string } };
 }
+
+// Exakte Standard-Positionen nach deinen Screenshots
+const initialCostItems = [
+  // I. Bewirtschaftung (Kosten) - Umlagefähige kalte Betriebskosten
+  { id: "abfall", name: "Abfallentsorgung", category: "Kalt-NK", amount: 640, key: "Wohnfläche (m²)", active: true },
+  { id: "oberflaeche", name: "Oberflächenwasser", category: "Kalt-NK", amount: 210, key: "Wohnfläche (m²)", active: true },
+  { id: "strassen", name: "Straßenreinigung", category: "Kalt-NK", amount: 150, key: "Wohnfläche (m²)", active: true },
+  { id: "haftpflicht", name: "Gebäudehaftpflichtversicherung", category: "Kalt-NK", amount: 320, key: "Wohnfläche (m²)", active: true },
+  { id: "leitungswasser", name: "Geb.-Vers. Leitungswasser/Sturm", category: "Kalt-NK", amount: 780, key: "Wohnfläche (m²)", active: true },
+  { id: "glasbruch", name: "Glasbruchversicherung", category: "Kalt-NK", amount: 120, key: "Wohnfläche (m²)", active: true },
+  { id: "strom_bel", name: "Strom (Beleuchtung)", category: "Kalt-NK", amount: 190, key: "Personen / Einheiten", active: true },
+  { id: "garten", name: "Gartenpflege (Fremdfirma)", category: "Kalt-NK", amount: 850, key: "Wohnfläche (m²)", active: true },
+  { id: "reinigung", name: "Reinigung (Fremdfirma)", category: "Kalt-NK", amount: 1200, key: "Wohnfläche (m²)", active: true },
+  { id: "hausmeister", name: "Hausmeister (Fremdfirma)", category: "Kalt-NK", amount: 1500, key: "Wohnfläche (m²)", active: true },
+  { id: "rwm", name: "Wartung RWM", category: "Kalt-NK", amount: 250, key: "Stück", active: true },
+
+  // II. Bewirtschaftung (Kosten) - Umlagefähige warme Betriebskosten
+  { id: "heizkosten", name: "Heizkosten gemäß Fremdabrechner", category: "Warm-NK", amount: 2450, key: "Verbrauch / m²", active: true },
+
+  // III. Bewirtschaftung (Erträge)
+  { id: "ertrag_wasser", name: "Wasser / Rückerstattung", category: "Ertrag", amount: -60, key: "Wohnfläche (m²)", active: true },
+
+  // IV. Rücklage / Nicht Umlagefähige Positionen
+  { id: "rwm_miete", name: "Rauchwarnmelder Miete", category: "Nicht umlagefähig", amount: 120, key: "Stück", active: true },
+  { id: "reparaturen", name: "Reparaturen", category: "Nicht umlagefähig", amount: 450, key: "Anteile (1000stel)", active: true },
+  { id: "konto", name: "Kontoführungskosten (Giro)", category: "Nicht umlagefähig", amount: 84, key: "Pauschal", active: true },
+  { id: "direkt", name: "Kosten Direktzuordnung", category: "Nicht umlagefähig", amount: 0, key: "Pauschal", active: true },
+  { id: "verwalter", name: "Verwalterentgelt", category: "Nicht umlagefähig", amount: 960, key: "Pauschal", active: true },
+  { id: "verwalter_gem", name: "Verwalterentgelt (gem. Vereinb.)", category: "Nicht umlagefähig", amount: 0, key: "Pauschal", active: true },
+];
 
 export default function Home() {
   const [activePage, setActivePage] = useState("Überblick");
@@ -101,6 +130,9 @@ export default function Home() {
 
   // Globaler Verteilerschlüssel
   const [globalKeyType, setGlobalKeyType] = useState<string>("Wohnfläche (m²)");
+
+  // Zentraler State für alle Kostenpositionen (damit Änderungen in der Ansicht 1 in Ansicht 2 übernommen werden!)
+  const [costItems, setCostItems] = useState(initialCostItems);
 
   // Lokaler State für die bearbeitbaren Einheiten-Schlüssel im Gebäude (qm, Personen, 1000stel etc.)
   const [buildingUnitParams, setBuildingUnitParams] = useState<Record<string, { sqm: number; persons: number; shares: number; pieces: number }>>({});
@@ -139,18 +171,6 @@ export default function Home() {
     end_date: "",
   });
 
-  const [editTenantForm, setEditTenantForm] = useState({
-    unit_id: "",
-    first_name: "",
-    last_name: "",
-    email: "",
-    phone: "",
-    rent_amount: "",
-    utility_advance: "",
-    start_date: "",
-    end_date: "",
-  });
-
   const [newPayment, setNewPayment] = useState({
     tenant_id: "",
     amount: "",
@@ -172,7 +192,6 @@ export default function Home() {
     fetchData();
   }, []);
 
-  // Sobald Einheiten oder das ausgewählte Gebäude sich ändern, initialisieren wir die Parameter-Inputs
   useEffect(() => {
     const currentUnits = units.filter((u) => u.property_id === selectedPropertyForBk);
     const initialParams: Record<string, { sqm: number; persons: number; shares: number; pieces: number }> = {};
@@ -253,163 +272,6 @@ export default function Home() {
     setLoading(false);
   }
 
-  async function handleCreateProperty(e: React.FormEvent) {
-    e.preventDefault();
-    if (!newProp.name || !newProp.address) return;
-
-    const { error } = await supabase.from("properties").insert([newProp]);
-    if (!error) {
-      setNewProp({ name: "", address: "", zip_code: "", city: "" });
-      setShowAddPropModal(false);
-      fetchData();
-    } else alert("Fehler: " + error.message);
-  }
-
-  async function handleCreateUnit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!newUnit.property_id || !newUnit.unit_number) return;
-
-    const { error } = await supabase.from("units").insert([
-      {
-        property_id: newUnit.property_id,
-        unit_number: newUnit.unit_number,
-        size_sqm: Number(newUnit.size_sqm) || 0,
-        rooms: Number(newUnit.rooms) || 0,
-        status: newUnit.status,
-      },
-    ]);
-
-    if (!error) {
-      setNewUnit({ property_id: "", unit_number: "", size_sqm: "", rooms: "", status: "vermietet" });
-      setShowAddUnitModal(false);
-      fetchData();
-    } else alert("Fehler: " + error.message);
-  }
-
-  async function handleCreateTenant(e: React.FormEvent) {
-    e.preventDefault();
-    if (!newTenant.first_name || !newTenant.last_name || !newTenant.unit_id) return;
-
-    const cold = Number(newTenant.rent_amount) || 0;
-    const util = Number(newTenant.utility_advance) || 0;
-    const warm = cold + util;
-
-    const { error } = await supabase.from("tenants").insert([
-      {
-        unit_id: newTenant.unit_id,
-        first_name: newTenant.first_name,
-        last_name: newTenant.last_name,
-        email: newTenant.email,
-        phone: newTenant.phone,
-        rent_amount: cold,
-        utility_advance: util,
-        warm_rent: warm,
-        start_date: newTenant.start_date || null,
-        end_date: newTenant.end_date || null,
-      },
-    ]);
-
-    if (!error) {
-      setNewTenant({
-        unit_id: "",
-        first_name: "",
-        last_name: "",
-        email: "",
-        phone: "",
-        rent_amount: "",
-        utility_advance: "",
-        start_date: new Date().toISOString().split("T")[0],
-        end_date: "",
-      });
-      setShowAddTenantModal(false);
-      fetchData();
-    } else alert("Fehler: " + error.message);
-  }
-
-  function openEditTenant(tenant: Tenant) {
-    setEditingTenant(tenant);
-    setEditTenantForm({
-      unit_id: tenant.unit_id || (units.length > 0 ? units[0].id : ""),
-      first_name: tenant.first_name || "",
-      last_name: tenant.last_name || "",
-      email: tenant.email || "",
-      phone: tenant.phone || "",
-      rent_amount: String(tenant.rent_amount || 0),
-      utility_advance: String(tenant.utility_advance || 0),
-      start_date: tenant.start_date || "",
-      end_date: tenant.end_date || "",
-    });
-  }
-
-  async function handleUpdateTenant(e: React.FormEvent) {
-    e.preventDefault();
-    if (!editingTenant) return;
-
-    const cold = Number(editTenantForm.rent_amount) || 0;
-    const util = Number(editTenantForm.utility_advance) || 0;
-    const warm = cold + util;
-
-    const { error } = await supabase
-      .from("tenants")
-      .update({
-        unit_id: editTenantForm.unit_id,
-        first_name: editTenantForm.first_name,
-        last_name: editTenantForm.last_name,
-        email: editTenantForm.email,
-        phone: editTenantForm.phone,
-        rent_amount: cold,
-        utility_advance: util,
-        warm_rent: warm,
-        start_date: editTenantForm.start_date || null,
-        end_date: editTenantForm.end_date || null,
-      })
-      .eq("id", editingTenant.id);
-
-    if (!error) {
-      setEditingTenant(null);
-      fetchData();
-    } else alert("Fehler beim Aktualisieren: " + error.message);
-  }
-
-  async function handleCreatePayment(e: React.FormEvent) {
-    e.preventDefault();
-    if (!newPayment.tenant_id || !newPayment.amount) return;
-
-    const { error } = await supabase.from("payments").insert([
-      {
-        tenant_id: newPayment.tenant_id,
-        amount: Number(newPayment.amount),
-        payment_date: newPayment.payment_date,
-        due_date: newPayment.due_date,
-        type: newPayment.type,
-        status: newPayment.status,
-        notes: newPayment.notes,
-      },
-    ]);
-
-    if (!error) {
-      setNewPayment({
-        tenant_id: "",
-        amount: "",
-        payment_date: new Date().toISOString().split("T")[0],
-        due_date: new Date().toISOString().split("T")[0],
-        type: "Miete",
-        status: "pünktlich",
-        notes: "",
-      });
-      setShowAddPaymentModal(false);
-      fetchData();
-    } else alert("Fehler beim Erfassen der Zahlung: " + error.message);
-  }
-
-  async function handleCreateOperatingCost(e: React.FormEvent) {
-    e.preventDefault();
-    if (!newOperatingCost.property_id || !newOperatingCost.betrag) return;
-    
-    alert("Beleg/Rechnung für das ausgewählte Gebäude erfolgreich erfasst!");
-    setShowAddOperatingCostModal(false);
-  }
-
   const formatEuro = (val: number) =>
     new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR" }).format(val);
 
@@ -434,31 +296,15 @@ export default function Home() {
   const currentPropertyUnits = units.filter((u) => u.property_id === selectedPropertyForBk);
   const currentPropertyObj = properties.find((p) => p.id === selectedPropertyForBk);
 
-  // Gesamtsummen der Schlüssel für prozentuale Aufteilung berechnen
   const totalSqm = currentPropertyUnits.reduce((sum, u) => sum + (buildingUnitParams[u.id]?.sqm || Number(u.size_sqm) || 0), 0) || 1;
   const totalPersons = currentPropertyUnits.reduce((sum, u) => sum + (buildingUnitParams[u.id]?.persons || 0), 0) || 1;
   const totalShares = currentPropertyUnits.reduce((sum, u) => sum + (buildingUnitParams[u.id]?.shares || 0), 0) || 1000;
   const totalPieces = currentPropertyUnits.reduce((sum, u) => sum + (buildingUnitParams[u.id]?.pieces || 0), 0) || 1;
 
-  // Feste Beispiel-Gesamtkosten für die Positionen im Gebäude
-  const costItemsDef = [
-    { name: "Abfallentsorgung", amount: 640, key: "Wohnfläche (m²)" },
-    { name: "Oberflächenwasser", amount: 210, key: "Wohnfläche (m²)" },
-    { name: "Straßenreinigung", amount: 150, key: "Wohnfläche (m²)" },
-    { name: "Gebäudehaftpflicht", amount: 320, key: "Wohnfläche (m²)" },
-    { name: "Versicherung Leitungswasser", amount: 780, key: "Wohnfläche (m²)" },
-    { name: "Strom (Beleuchtung)", amount: 190, key: "Personen / Einheiten" },
-    { name: "Gartenpflege", amount: 850, key: "Wohnfläche (m²)" },
-    { name: "Reinigung", amount: 1200, key: "Wohnfläche (m²)" },
-    { name: "Hausmeister", amount: 1500, key: "Wohnfläche (m²)" },
-    { name: "Wartung RWM", amount: 250, key: "Stück" },
-    { name: "Heizkosten", amount: 2450, key: "Verbrauch / m²" },
-    { name: "Warmwasser", amount: 820, key: "Verbrauch / m²" },
-    // Nicht umlagefähig
-    { name: "Rauchwarnmelder Miete", amount: 120, key: "Stück", notUmlag: true },
-    { name: "Reparaturen", amount: 450, key: "Anteile (1000stel)", notUmlag: true },
-    { name: "Verwalterentgelt", amount: 960, key: "Pauschal", notUmlag: true },
-  ];
+  // Handler zum Ändern einzelner Positionen direkt im State
+  const handleItemChange = (id: string, field: string, value: any) => {
+    setCostItems(prev => prev.map(item => item.id === id ? { ...item, [field]: value } : item));
+  };
 
   return (
     <div className="min-h-screen bg-[#f5f7fb] text-[#1d2939]">
@@ -498,37 +344,12 @@ export default function Home() {
           </header>
 
           <div className="mx-auto max-w-[1450px] p-7">
-            {/* ÜBERBLICK */}
             {activePage === "Überblick" && (
               <>
                 <div>
                   <h2 className="text-[21px] font-bold">Guten Morgen!</h2>
-                  <p className="mt-1 text-sm text-gray-500">
-                    Hier ist die Übersicht Ihrer Immobilien (Live aus Supabase).
-                  </p>
+                  <p className="mt-1 text-sm text-gray-500">Hier ist die Übersicht Ihrer Immobilien.</p>
                 </div>
-
-                {!loading && stats.unpaidTenantsCount > 0 && (
-                  <div className="mt-5 flex items-center justify-between rounded-xl border border-red-200 bg-red-50 p-4 text-red-800">
-                    <div className="flex items-center gap-3">
-                      <span className="text-xl">⚠️</span>
-                      <div>
-                        <div className="font-bold text-sm">
-                          {stats.unpaidTenantsCount} Mieter haben in diesem Monat noch nicht gezahlt!
-                        </div>
-                        <div className="text-xs text-red-600 mt-0.5">
-                          Ausstandartig: {unpaidTenantsList.map((t) => `${t.first_name} ${t.last_name}`).join(", ")}
-                        </div>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => setActivePage("Zahlungen")}
-                      className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700"
-                    >
-                      Zahlungen prüfen →
-                    </button>
-                  </div>
-                )}
 
                 <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
                   <StatCard title="Objekte" value={loading ? "..." : String(stats.propertiesCount)} subtitle="Wohngebäude" icon="▦" iconClass="bg-blue-50 text-blue-600" />
@@ -540,278 +361,15 @@ export default function Home() {
               </>
             )}
 
-            {/* OBJEKTE */}
-            {activePage === "Objekte" && (
-              <div>
-                <div className="flex items-center justify-between mb-6">
-                  <div>
-                    <h2 className="text-[21px] font-bold">Ihre Objekte</h2>
-                    <p className="text-sm text-gray-500">Verwalten Sie hier alle Gebäude und Verwaltereinheiten.</p>
-                  </div>
-                  <button onClick={() => setShowAddPropModal(true)} className="rounded-lg bg-[#2f6fd0] px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition">
-                    + Objekt hinzufügen
-                  </button>
-                </div>
-
-                {loading ? <div>Lade Objekte...</div> : properties.length === 0 ? (
-                  <div className="rounded-xl border border-[#e7ebf2] bg-white p-10 text-center">Keine Objekte vorhanden.</div>
-                ) : (
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-                    {properties.map((prop) => (
-                      <div key={prop.id} className="rounded-xl border border-[#e7ebf2] bg-white p-5 shadow-sm">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-blue-600 text-lg font-bold">▦</div>
-                        <h3 className="mt-4 text-base font-bold">{prop.name}</h3>
-                        <p className="mt-1 text-xs text-gray-500">{prop.address}</p>
-                        <p className="text-xs text-gray-500">{prop.zip_code} {prop.city}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* EINHEITEN */}
-            {activePage === "Einheiten" && (
-              <div>
-                <div className="flex items-center justify-between mb-6">
-                  <div>
-                    <h2 className="text-[21px] font-bold">Einheiten</h2>
-                    <p className="text-sm text-gray-500">Übersicht aller Wohnungen und Gewerbeeinheiten.</p>
-                  </div>
-                  <button
-                    onClick={() => {
-                      if (properties.length === 0) return alert("Legen Sie zuerst ein Objekt an!");
-                      setNewUnit({ ...newUnit, property_id: properties[0].id });
-                      setShowAddUnitModal(true);
-                    }}
-                    className="rounded-lg bg-[#2f6fd0] px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition"
-                  >
-                    + Einheit hinzufügen
-                  </button>
-                </div>
-
-                {loading ? <div>Lade Einheiten...</div> : units.length === 0 ? (
-                  <div className="rounded-xl border border-[#e7ebf2] bg-white p-10 text-center">Keine Einheiten vorhanden.</div>
-                ) : (
-                  <div className="overflow-hidden rounded-xl border border-[#e7ebf2] bg-white shadow-sm">
-                    <table className="w-full text-left text-sm">
-                      <thead className="border-b border-[#e7ebf2] bg-gray-50 text-xs text-gray-500">
-                        <tr>
-                          <th className="p-4">Einheit / Nr.</th>
-                          <th className="p-4">Objekt / Gebäude</th>
-                          <th className="p-4">Fläche</th>
-                          <th className="p-4">Zimmer</th>
-                          <th className="p-4">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-[#e7ebf2]">
-                        {units.map((u) => (
-                          <tr key={u.id} className="hover:bg-gray-50">
-                            <td className="p-4 font-semibold">{u.unit_number}</td>
-                            <td className="p-4 text-gray-600 font-medium">{u.properties?.name || "-"}</td>
-                            <td className="p-4 text-gray-600">{u.size_sqm} m²</td>
-                            <td className="p-4 text-gray-600">{u.rooms}</td>
-                            <td className="p-4">
-                              <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${u.status === "vermietet" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-                                {u.status}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* MIETER */}
-            {activePage === "Mieter" && (
-              <div>
-                <div className="flex items-center justify-between mb-6">
-                  <div>
-                    <h2 className="text-[21px] font-bold">Mieter</h2>
-                    <p className="text-sm text-gray-500">Verwalten Sie Mieterdaten, Mietzeiträume und Kosten.</p>
-                  </div>
-                  <button
-                    onClick={() => {
-                      if (units.length === 0) return alert("Legen Sie zuerst eine Einheit an!");
-                      setNewTenant({ ...newTenant, unit_id: units[0].id });
-                      setShowAddTenantModal(true);
-                    }}
-                    className="rounded-lg bg-[#2f6fd0] px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition"
-                  >
-                    + Mieter hinzufügen
-                  </button>
-                </div>
-
-                {loading ? <div>Lade Mieter...</div> : tenants.length === 0 ? (
-                  <div className="rounded-xl border border-[#e7ebf2] bg-white p-10 text-center">Keine Mieter vorhanden.</div>
-                ) : (
-                  <div className="overflow-hidden rounded-xl border border-[#e7ebf2] bg-white shadow-sm">
-                    <table className="w-full text-left text-sm">
-                      <thead className="border-b border-[#e7ebf2] bg-gray-50 text-xs text-gray-500">
-                        <tr>
-                          <th className="p-4">Name</th>
-                          <th className="p-4">Objekt & Einheit</th>
-                          <th className="p-4">Mietzeitraum</th>
-                          <th className="p-4">Kontakt</th>
-                          <th className="p-4">Kaltmiete</th>
-                          <th className="p-4">NK-Vorausz.</th>
-                          <th className="p-4">Warmmiete</th>
-                          <th className="p-4 text-right">Aktionen</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-[#e7ebf2]">
-                        {tenants.map((t) => {
-                          const cold = Number(t.rent_amount || 0);
-                          const util = Number(t.utility_advance || 0);
-                          const warm = Number(t.warm_rent || cold + util);
-
-                          return (
-                            <tr key={t.id} className="hover:bg-gray-50">
-                              <td className="p-4 font-semibold">{t.first_name} {t.last_name}</td>
-                              <td className="p-4 text-gray-600">{t.units?.properties?.name} ({t.units?.unit_number})</td>
-                              <td className="p-4 text-xs text-gray-600">
-                                <div><span className="text-gray-400">Seit:</span> {formatDate(t.start_date)}</div>
-                                <div><span className="text-gray-400">Bis:</span> {t.end_date ? formatDate(t.end_date) : "Unbefristet"}</div>
-                              </td>
-                              <td className="p-4 text-xs text-gray-600">
-                                <div>{t.email || "-"}</div>
-                                <div className="text-gray-400">{t.phone || "-"}</div>
-                              </td>
-                              <td className="p-4 text-gray-700">{formatEuro(cold)}</td>
-                              <td className="p-4 text-gray-500">{formatEuro(util)}</td>
-                              <td className="p-4 font-bold text-green-600">{formatEuro(warm)}</td>
-                              <td className="p-4 text-right">
-                                <button
-                                  onClick={() => openEditTenant(t)}
-                                  className="rounded border border-gray-300 px-2.5 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-100 transition"
-                                >
-                                  Bearbeiten ✏️
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ZAHLUNGEN */}
-            {activePage === "Zahlungen" && (
-              <div>
-                <div className="flex items-center justify-between mb-6">
-                  <div>
-                    <h2 className="text-[21px] font-bold">Mietzahlungen & Einnahmen</h2>
-                    <p className="text-sm text-gray-500">Erfassen und überwachen Sie alle eingehenden Mietzahlungen.</p>
-                  </div>
-                  <button
-                    onClick={() => {
-                      if (tenants.length === 0) return alert("Legen Sie zuerst einen Mieter an!");
-                      setNewPayment({ ...newPayment, tenant_id: tenants[0].id, amount: String(tenants[0].warm_rent || 0) });
-                      setShowAddPaymentModal(true);
-                    }}
-                    className="rounded-lg bg-[#2f6fd0] px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition"
-                  >
-                    + Zahlung erfassen
-                  </button>
-                </div>
-
-                <div className="mb-4 flex flex-wrap gap-3 rounded-xl border border-[#e7ebf2] bg-white p-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-gray-500">Jahr:</span>
-                    <select
-                      value={paymentFilterYear}
-                      onChange={(e) => setPaymentFilterYear(e.target.value)}
-                      className="rounded-lg border border-gray-200 p-1.5 text-xs bg-gray-50"
-                    >
-                      <option value="all">Alle Jahre</option>
-                      {availableYears.map((y) => (
-                        <option key={y} value={y}>{y}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-gray-500">Mieter:</span>
-                    <select
-                      value={paymentFilterTenant}
-                      onChange={(e) => setPaymentFilterTenant(e.target.value)}
-                      className="rounded-lg border border-gray-200 p-1.5 text-xs bg-gray-50"
-                    >
-                      <option value="all">Alle Mieter</option>
-                      {tenants.map((t) => (
-                        <option key={t.id} value={t.id}>{t.first_name} {t.last_name}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-gray-500">Status:</span>
-                    <select
-                      value={paymentFilterStatus}
-                      onChange={(e) => setPaymentFilterStatus(e.target.value)}
-                      className="rounded-lg border border-gray-200 p-1.5 text-xs bg-gray-50"
-                    >
-                      <option value="all">Alle Status</option>
-                      <option value="pünktlich">Pünktlich</option>
-                      <option value="unvollständig">Unvollständig</option>
-                      <option value="ausstehend">Ausstehend</option>
-                    </select>
-                  </div>
-                </div>
-
-                {loading ? (
-                  <div>Lade Zahlungen...</div>
-                ) : filteredPayments.length === 0 ? (
-                  <div className="rounded-xl border border-[#e7ebf2] bg-white p-10 text-center">Keine Zahlungen für diesen Filter gefunden.</div>
-                ) : (
-                  <div className="overflow-hidden rounded-xl border border-[#e7ebf2] bg-white shadow-sm">
-                    <table className="w-full text-left text-sm">
-                      <thead className="border-b border-[#e7ebf2] bg-gray-50 text-xs text-gray-500">
-                        <tr>
-                          <th className="p-4">Mieter</th>
-                          <th className="p-4">Typ</th>
-                          <th className="p-4">Eingangsdatum</th>
-                          <th className="p-4">Fälligkeit</th>
-                          <th className="p-4">Betrag</th>
-                          <th className="p-4">Status</th>
-                          <th className="p-4">Notiz</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-[#e7ebf2]">
-                        {filteredPayments.map((p) => (
-                          <tr key={p.id} className="hover:bg-gray-50">
-                            <td className="p-4 font-semibold">{p.tenants ? `${p.tenants.first_name} ${p.tenants.last_name}` : "Unbekannt"}</td>
-                            <td className="p-4 text-gray-600">{p.type}</td>
-                            <td className="p-4 text-gray-600">{formatDate(p.payment_date)}</td>
-                            <td className="p-4 text-gray-600">{formatDate(p.due_date)}</td>
-                            <td className="p-4 font-semibold">{formatEuro(p.amount)}</td>
-                            <td className="p-4">{p.status}</td>
-                            <td className="p-4 text-gray-500">{p.notes || "-"}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* BETRIEBSKOSTEN (GEBÄUDE-SPEZIFISCH & GETRENNT) */}
+            {/* BETRIEBSKOSTEN (EXAKTE REIHENFOLGE NACH SCREENSHOTS) */}
             {activePage === "Betriebskosten" && (
               <div>
                 <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
                   <div>
                     <h2 className="text-[21px] font-bold">Betriebskosten & Gebäude-Abrechnung</h2>
-                    <p className="text-sm text-gray-500">Erfassen Sie Gesamtkosten je Gebäude und prüfen Sie die Aufteilung auf die zugehörigen Wohnungen.</p>
+                    <p className="text-sm text-gray-500">Erfassen und aufteilen nach deinen genauen Vorlagen.</p>
                   </div>
 
-                  {/* UNTERMENÜ-REITER */}
                   <div className="flex rounded-xl bg-gray-200/70 p-1">
                     <button
                       onClick={() => setBkSubTab("abrechnung")}
@@ -835,23 +393,22 @@ export default function Home() {
                         bkSubTab === "belege" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"
                       }`}
                     >
-                      📁 Belege & KI-Upload
+                      📁 Belege
                     </button>
                   </div>
                 </div>
 
-                {/* GEBÄUDE-AUSWAHL */}
                 <div className="mb-6 flex flex-wrap gap-4 items-center justify-between rounded-xl border border-[#e7ebf2] bg-white p-4 shadow-sm">
                   <div className="flex flex-wrap gap-4 items-center">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-gray-700">📍 Aktuelles Gebäude / Objekt:</span>
+                      <span className="text-xs font-bold text-gray-700">📍 Objekt:</span>
                       <select
                         value={selectedPropertyForBk}
                         onChange={(e) => setSelectedPropertyForBk(e.target.value)}
                         className="rounded-lg border border-blue-300 bg-blue-50/50 p-2 text-xs font-bold text-blue-900"
                       >
                         {properties.map((p) => (
-                          <option key={p.id} value={p.id}>{p.name} — {p.city} ({p.address})</option>
+                          <option key={p.id} value={p.id}>{p.name} — {p.city}</option>
                         ))}
                       </select>
                     </div>
@@ -875,122 +432,281 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* UNTERMENÜ 1: GESAMTKOSTEN ERFASSEN */}
+                {/* UNTERMENÜ 1: GESAMTKOSTEN (EXAKTE REIHENFOLGE) */}
                 {bkSubTab === "abrechnung" && (
-                  <div className="space-y-6">
-                    <div className="rounded-xl border border-[#e7ebf2] bg-white p-6 shadow-sm">
-                      <div className="flex justify-between items-center mb-4 border-b pb-3">
-                        <h3 className="text-base font-bold text-gray-800">
-                          Gesamtkosten erfassen für: <span className="text-blue-600">{currentPropertyObj?.name}</span> ({bkYear})
-                        </h3>
-                        <span className="text-xs bg-blue-50 text-blue-700 px-2.5 py-1 rounded-full font-semibold">Stichtag: 31.12.{bkYear}</span>
-                      </div>
-
-                      <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-gray-50 p-4 border border-gray-200">
-                        <div className="text-xs font-bold text-gray-700">
-                          ⚡ Globaler Verteilerschlüssel für dieses Gebäude (ändert alle Positionen):
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <select
-                            value={globalKeyType}
-                            onChange={(e) => setGlobalKeyType(e.target.value)}
-                            className="rounded-lg border border-gray-300 p-2 text-xs bg-white font-semibold"
-                          >
-                            <option value="Wohnfläche (m²)">Wohnfläche (m²)</option>
-                            <option value="Anteile (1000stel)">Anteile (1000stel)</option>
-                            <option value="Personen / Einheiten">Personen / Einheiten</option>
-                            <option value="Verbrauch / m²">Verbrauch / m² (Heizung)</option>
-                            <option value="Stück">Stück (Rauchwarnmelder)</option>
-                            <option value="Pauschal">Pauschal (Direktzuordnung / Verwalter)</option>
-                          </select>
-                        </div>
-                      </div>
-
-                      <div className="overflow-x-auto space-y-8">
-                        <div>
-                          <h4 className="text-sm font-bold text-gray-900 border-b border-gray-200 pb-2 mb-3">
-                            I. Bewirtschaftung (Kosten) – Umlagefähige kalte Betriebskosten
-                          </h4>
-                          <table className="w-full text-left text-sm">
-                            <thead className="bg-gray-50 text-xs text-gray-500">
-                              <tr>
-                                <th className="p-2.5 w-10 text-center">Aktiv</th>
-                                <th className="p-2.5">Kostenart</th>
-                                <th className="p-2.5">Verteilerschlüssel wählen</th>
-                                <th className="p-2.5 text-right">Gesamtkosten (€)</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-[#e7ebf2] text-xs">
-                              {costItemsDef.filter(c => !c.notUmlag).map((item, idx) => (
-                                <CostItemRow key={idx} label={item.name} defaultActive={true} overrideKey={globalKeyType} defaultAmount={item.amount.toFixed(2)} />
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-
-                        <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-4">
-                          <div className="flex items-center justify-between mb-3 border-b border-amber-200 pb-2">
-                            <h4 className="text-sm font-bold text-amber-900">
-                              🔒 Nicht umlagefähige Positionen (Nur für Vermieter / Dashboard)
-                            </h4>
-                            <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-semibold uppercase">Vermieter-Ansicht</span>
-                          </div>
-                          <table className="w-full text-left text-sm">
-                            <thead className="bg-amber-100/50 text-xs text-amber-900">
-                              <tr>
-                                <th className="p-2.5 w-10 text-center">Aktiv</th>
-                                <th className="p-2.5">Kostenart</th>
-                                <th className="p-2.5">Verteilerschlüssel wählen</th>
-                                <th className="p-2.5 text-right">Gesamtkosten (€)</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-amber-200 text-xs">
-                              {costItemsDef.filter(c => c.notUmlag).map((item, idx) => (
-                                <CostItemRow key={idx} label={item.name} defaultActive={true} overrideKey={item.key} defaultAmount={item.amount.toFixed(2)} />
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-
-                      <div className="mt-6 flex justify-end gap-3 border-t pt-4">
-                        <button
-                          onClick={() => {
-                            setSavedAbrechnungStatus("Als Entwurf gespeichert für " + (currentPropertyObj?.name || "Objekt"));
-                            setLastSavedData({ year: bkYear, propertyId: selectedPropertyForBk, date: new Date() });
-                            alert("Entwurf gespeichert!");
+                  <div className="rounded-xl border border-[#e7ebf2] bg-white p-6 shadow-sm space-y-8">
+                    <div className="flex justify-between items-center border-b pb-3">
+                      <h3 className="text-base font-bold text-gray-800">
+                        Bewirtschaftung für: <span className="text-blue-600">{currentPropertyObj?.name}</span> ({bkYear})
+                      </h3>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-gray-600">Globaler Schlüssel:</span>
+                        <select
+                          value={globalKeyType}
+                          onChange={(e) => {
+                            setGlobalKeyType(e.target.value);
+                            setCostItems(prev => prev.map(i => ({ ...i, key: e.target.value })));
                           }}
-                          className="rounded-lg border border-gray-300 px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition"
+                          className="rounded-lg border border-gray-300 p-1.5 text-xs bg-gray-50 font-semibold"
                         >
-                          Entwurf speichern
-                        </button>
-                        <button
-                          onClick={() => {
-                            setSavedAbrechnungStatus("Berechnet für " + (currentPropertyObj?.name || "Objekt") + " 🚀");
-                            setLastSavedData({ year: bkYear, propertyId: selectedPropertyForBk, date: new Date() });
-                            setBkSubTab("einheitenaufteilung");
-                          }}
-                          className="rounded-lg bg-[#2f6fd0] px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 transition"
-                        >
-                          Bestätigen & Aufteilung anzeigen 🚀
-                        </button>
+                          <option value="Wohnfläche (m²)">Wohnfläche (m²)</option>
+                          <option value="Anteile (1000stel)">Anteile (1000stel)</option>
+                          <option value="Personen / Einheiten">Personen / Einheiten</option>
+                          <option value="Verbrauch / m²">Verbrauch / m²</option>
+                          <option value="Stück">Stück</option>
+                          <option value="Pauschal">Pauschal</option>
+                        </select>
                       </div>
+                    </div>
+
+                    {/* I. Umlagefähige kalte Betriebskosten */}
+                    <div>
+                      <h4 className="text-sm font-bold text-gray-900 border-b border-gray-200 pb-2 mb-3">
+                        Bewirtschaftung (Kosten) – Umlagefähige kalte Betriebskosten
+                      </h4>
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-gray-50 text-gray-500">
+                          <tr>
+                            <th className="p-2 w-10 text-center">Aktiv</th>
+                            <th className="p-2">Kostenart</th>
+                            <th className="p-2">Verteilerschlüssel</th>
+                            <th className="p-2 text-right">Gesamtkosten (€)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {costItems.filter(i => i.category === "Kalt-NK").map(item => (
+                            <tr key={item.id} className="hover:bg-gray-50">
+                              <td className="p-2 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={item.active}
+                                  onChange={(e) => handleItemChange(item.id, "active", e.target.checked)}
+                                  className="h-4 w-4 rounded border-gray-300 text-blue-600 cursor-pointer"
+                                />
+                              </td>
+                              <td className={`p-2 font-medium ${!item.active ? "text-gray-400 line-through" : "text-gray-800"}`}>
+                                {item.name}
+                              </td>
+                              <td className="p-2">
+                                <select
+                                  value={item.key}
+                                  onChange={(e) => handleItemChange(item.id, "key", e.target.value)}
+                                  disabled={!item.active}
+                                  className="rounded border border-gray-200 p-1 text-xs bg-gray-50 font-medium"
+                                >
+                                  <option value="Wohnfläche (m²)">Wohnfläche (m²)</option>
+                                  <option value="Anteile (1000stel)">Anteile (1000stel)</option>
+                                  <option value="Personen / Einheiten">Personen / Einheiten</option>
+                                  <option value="Verbrauch / m²">Verbrauch / m²</option>
+                                  <option value="Stück">Stück</option>
+                                  <option value="Pauschal">Pauschal</option>
+                                </select>
+                              </td>
+                              <td className="p-2 text-right">
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={item.amount}
+                                  onChange={(e) => handleItemChange(item.id, "amount", parseFloat(e.target.value) || 0)}
+                                  disabled={!item.active}
+                                  className="w-28 rounded border border-gray-200 p-1 text-right text-xs bg-gray-50 font-semibold"
+                                />
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* II. Umlagefähige warme Betriebskosten */}
+                    <div>
+                      <h4 className="text-sm font-bold text-gray-900 border-b border-gray-200 pb-2 mb-3">
+                        Bewirtschaftung (Kosten) – Umlagefähige warme Betriebskosten
+                      </h4>
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-gray-50 text-gray-500">
+                          <tr>
+                            <th className="p-2 w-10 text-center">Aktiv</th>
+                            <th className="p-2">Kostenart</th>
+                            <th className="p-2">Verteilerschlüssel</th>
+                            <th className="p-2 text-right">Gesamtkosten (€)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {costItems.filter(i => i.category === "Warm-NK").map(item => (
+                            <tr key={item.id} className="hover:bg-gray-50">
+                              <td className="p-2 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={item.active}
+                                  onChange={(e) => handleItemChange(item.id, "active", e.target.checked)}
+                                  className="h-4 w-4 rounded border-gray-300 text-blue-600 cursor-pointer"
+                                />
+                              </td>
+                              <td className={`p-2 font-medium ${!item.active ? "text-gray-400 line-through" : "text-gray-800"}`}>
+                                {item.name}
+                              </td>
+                              <td className="p-2">
+                                <select
+                                  value={item.key}
+                                  onChange={(e) => handleItemChange(item.id, "key", e.target.value)}
+                                  disabled={!item.active}
+                                  className="rounded border border-gray-200 p-1 text-xs bg-gray-50 font-medium"
+                                >
+                                  <option value="Verbrauch / m²">Verbrauch / m²</option>
+                                  <option value="Wohnfläche (m²)">Wohnfläche (m²)</option>
+                                  <option value="Pauschal">Pauschal</option>
+                                </select>
+                              </td>
+                              <td className="p-2 text-right">
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={item.amount}
+                                  onChange={(e) => handleItemChange(item.id, "amount", parseFloat(e.target.value) || 0)}
+                                  disabled={!item.active}
+                                  className="w-28 rounded border border-gray-200 p-1 text-right text-xs bg-gray-50 font-semibold"
+                                />
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* III. Bewirtschaftung (Erträge) - Negative Werte / Erstattungen */}
+                    <div>
+                      <h4 className="text-sm font-bold text-emerald-900 border-b border-emerald-200 pb-2 mb-3">
+                        III. Bewirtschaftung (Erträge) (z. B. negative Werte / Rückzahlungen wie -60,00 €)
+                      </h4>
+                      <table className="w-full text-left text-xs bg-emerald-50/40 rounded-lg">
+                        <thead className="bg-emerald-100/50 text-emerald-900">
+                          <tr>
+                            <th className="p-2 w-10 text-center">Aktiv</th>
+                            <th className="p-2">Ertragsart</th>
+                            <th className="p-2">Verteilerschlüssel</th>
+                            <th className="p-2 text-right">Ertrag / Minderung (€)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-emerald-200">
+                          {costItems.filter(i => i.category === "Ertrag").map(item => (
+                            <tr key={item.id} className="hover:bg-emerald-50">
+                              <td className="p-2 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={item.active}
+                                  onChange={(e) => handleItemChange(item.id, "active", e.target.checked)}
+                                  className="h-4 w-4 rounded border-gray-300 text-emerald-600 cursor-pointer"
+                                />
+                              </td>
+                              <td className={`p-2 font-medium ${!item.active ? "text-gray-400 line-through" : "text-emerald-900"}`}>
+                                {item.name}
+                              </td>
+                              <td className="p-2">
+                                <select
+                                  value={item.key}
+                                  onChange={(e) => handleItemChange(item.id, "key", e.target.value)}
+                                  disabled={!item.active}
+                                  className="rounded border border-emerald-200 p-1 text-xs bg-white font-medium"
+                                >
+                                  <option value="Wohnfläche (m²)">Wohnfläche (m²)</option>
+                                  <option value="Pauschal">Pauschal</option>
+                                </select>
+                              </td>
+                              <td className="p-2 text-right">
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={item.amount}
+                                  onChange={(e) => handleItemChange(item.id, "amount", parseFloat(e.target.value) || 0)}
+                                  disabled={!item.active}
+                                  className="w-28 rounded border border-emerald-300 p-1 text-right text-xs bg-white font-semibold text-emerald-700"
+                                />
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* IV. Nicht Umlagefähige Positionen */}
+                    <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-4">
+                      <h4 className="text-sm font-bold text-amber-900 border-b border-amber-200 pb-2 mb-3">
+                        IV. Nicht Umlagefähige Positionen (Vermieter-Ansicht)
+                      </h4>
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-amber-100/50 text-amber-900">
+                          <tr>
+                            <th className="p-2 w-10 text-center">Aktiv</th>
+                            <th className="p-2">Position</th>
+                            <th className="p-2">Verteilerschlüssel</th>
+                            <th className="p-2 text-right">Betrag (€)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-amber-200">
+                          {costItems.filter(i => i.category === "Nicht umlagefähig").map(item => (
+                            <tr key={item.id} className="hover:bg-amber-50">
+                              <td className="p-2 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={item.active}
+                                  onChange={(e) => handleItemChange(item.id, "active", e.target.checked)}
+                                  className="h-4 w-4 rounded border-gray-300 text-amber-600 cursor-pointer"
+                                />
+                              </td>
+                              <td className={`p-2 font-medium ${!item.active ? "text-gray-400 line-through" : "text-amber-900"}`}>
+                                {item.name}
+                              </td>
+                              <td className="p-2">
+                                <select
+                                  value={item.key}
+                                  onChange={(e) => handleItemChange(item.id, "key", e.target.value)}
+                                  disabled={!item.active}
+                                  className="rounded border border-amber-200 p-1 text-xs bg-white font-medium"
+                                >
+                                  <option value="Pauschal">Pauschal</option>
+                                  <option value="Anteile (1000stel)">Anteile (1000stel)</option>
+                                  <option value="Stück">Stück</option>
+                                </select>
+                              </td>
+                              <td className="p-2 text-right">
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={item.amount}
+                                  onChange={(e) => handleItemChange(item.id, "amount", parseFloat(e.target.value) || 0)}
+                                  disabled={!item.active}
+                                  className="w-28 rounded border border-amber-300 p-1 text-right text-xs bg-white font-semibold"
+                                />
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="flex justify-end gap-3 border-t pt-4">
+                      <button
+                        onClick={() => {
+                          setSavedAbrechnungStatus("Übernommen für " + (currentPropertyObj?.name || "Objekt") + " 🚀");
+                          setLastSavedData({ year: bkYear, propertyId: selectedPropertyForBk, date: new Date() });
+                          setBkSubTab("einheitenaufteilung");
+                        }}
+                        className="rounded-lg bg-[#2f6fd0] px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 transition"
+                      >
+                        Bestätigen & Aufteilung anzeigen 🚀
+                      </button>
                     </div>
                   </div>
                 )}
 
-                {/* UNTERMENÜ 2: AUFTEILUNG NACH WOHNEINHEIT MIT EINGABE FÜR QM, 1000STEL, PERSONEN ETC. */}
+                {/* UNTERMENÜ 2: AUFTEILUNG NACH WOHNUNG */}
                 {bkSubTab === "einheitenaufteilung" && (
                   <div className="space-y-6">
-                    {/* HIER: PARAMETER-EINGABE FÜR DIE EINHEITEN DES GEBÄUDES */}
                     <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-5 shadow-sm">
                       <h3 className="text-sm font-bold text-blue-900 mb-2">
-                        1. Parameter je Wohneinheit für dieses Gebäude festlegen (m², Personen, 1000stel, Stück)
+                        1. Parameter je Wohneinheit (m², Personen, 1000stel, Stück)
                       </h3>
-                      <p className="text-xs text-blue-700 mb-4">
-                        Trage hier die genauen Anteile für die Wohnungen ein. Die Kosten werden unten automatisch anhand dieser Werte aufgeschlüsselt.
-                      </p>
-
                       {currentPropertyUnits.length === 0 ? (
                         <div className="text-xs text-gray-500">Keine Einheiten im gewählten Gebäude vorhanden.</div>
                       ) : (
@@ -1011,10 +727,7 @@ export default function Home() {
                                       value={pData.sqm}
                                       onChange={(e) => {
                                         const val = Number(e.target.value);
-                                        setBuildingUnitParams({
-                                          ...buildingUnitParams,
-                                          [u.id]: { ...pData, sqm: val },
-                                        });
+                                        setBuildingUnitParams({ ...buildingUnitParams, [u.id]: { ...pData, sqm: val } });
                                       }}
                                       className="w-full rounded border border-gray-300 p-1 text-xs font-semibold"
                                     />
@@ -1026,10 +739,7 @@ export default function Home() {
                                       value={pData.persons}
                                       onChange={(e) => {
                                         const val = Number(e.target.value);
-                                        setBuildingUnitParams({
-                                          ...buildingUnitParams,
-                                          [u.id]: { ...pData, persons: val },
-                                        });
+                                        setBuildingUnitParams({ ...buildingUnitParams, [u.id]: { ...pData, persons: val } });
                                       }}
                                       className="w-full rounded border border-gray-300 p-1 text-xs font-semibold"
                                     />
@@ -1041,25 +751,19 @@ export default function Home() {
                                       value={pData.shares}
                                       onChange={(e) => {
                                         const val = Number(e.target.value);
-                                        setBuildingUnitParams({
-                                          ...buildingUnitParams,
-                                          [u.id]: { ...pData, shares: val },
-                                        });
+                                        setBuildingUnitParams({ ...buildingUnitParams, [u.id]: { ...pData, shares: val } });
                                       }}
                                       className="w-full rounded border border-gray-300 p-1 text-xs font-semibold"
                                     />
                                   </div>
                                   <div>
-                                    <label className="text-[10px] text-gray-500 font-semibold block">Stück (RWM etc.)</label>
+                                    <label className="text-[10px] text-gray-500 font-semibold block">Stück</label>
                                     <input
                                       type="number"
                                       value={pData.pieces}
                                       onChange={(e) => {
                                         const val = Number(e.target.value);
-                                        setBuildingUnitParams({
-                                          ...buildingUnitParams,
-                                          [u.id]: { ...pData, pieces: val },
-                                        });
+                                        setBuildingUnitParams({ ...buildingUnitParams, [u.id]: { ...pData, pieces: val } });
                                       }}
                                       className="w-full rounded border border-gray-300 p-1 text-xs font-semibold"
                                     />
@@ -1072,34 +776,24 @@ export default function Home() {
                       )}
                     </div>
 
-                    {/* HIER: DIE AUSFÜHRLICHE TABELLE MIT EINZELPOSITIONEN JE WOHNUNG */}
                     <div className="rounded-xl border border-[#e7ebf2] bg-white p-6 shadow-sm">
-                      <div className="flex justify-between items-center mb-4 border-b pb-3">
-                        <div>
-                          <h3 className="text-base font-bold text-gray-800">
-                            2. Aufschlüsselung der Einzelpositionen je Wohnung für: <span className="text-blue-600">{currentPropertyObj?.name}</span> ({bkYear})
-                          </h3>
-                          <p className="text-xs text-gray-500 mt-0.5">Exakte Berechnung nach den oben hinterlegten Parametern.</p>
-                        </div>
-                        <span className="text-xs bg-green-50 text-green-700 px-2.5 py-1 rounded-full font-semibold">Live Berechnet</span>
-                      </div>
+                      <h3 className="text-base font-bold text-gray-800 mb-4 border-b pb-3">
+                        2. Aufschlüsselung je Wohnung (inkl. Erträge & geänderter Werte)
+                      </h3>
 
                       {currentPropertyUnits.length === 0 ? (
-                        <div className="text-center py-10 text-gray-500 text-xs">
-                          Keine Einheiten vorhanden.
-                        </div>
+                        <div className="text-center py-10 text-gray-500 text-xs">Keine Einheiten vorhanden.</div>
                       ) : (
-                        <div className="overflow-x-auto space-y-6">
+                        <div className="space-y-6">
                           {currentPropertyUnits.map((u) => {
                             const tenantForUnit = tenants.find((t) => t.unit_id === u.id);
                             const pData = buildingUnitParams[u.id] || { sqm: 70, persons: 2, shares: 250, pieces: 3 };
 
-                            // Berechne Einzelpositionen für diese Einheit
                             let unitKalteSum = 0;
                             let unitWarmeSum = 0;
-                            let unitNichtUmlagSum = 0;
+                            let unitErtragSum = 0;
 
-                            const calculatedRows = costItemsDef.map((item) => {
+                            const calculatedRows = costItems.filter(i => i.active).map((item) => {
                               let shareFactor = 0;
                               if (item.key.includes("Wohnfläche") || item.key.includes("Verbrauch")) {
                                 shareFactor = pData.sqm / totalSqm;
@@ -1110,28 +804,27 @@ export default function Home() {
                               } else if (item.key.includes("Stück")) {
                                 shareFactor = pData.pieces / totalPieces;
                               } else {
-                                // Pauschal / Gleichmäßig aufteilen
                                 shareFactor = 1 / currentPropertyUnits.length;
                               }
 
                               const valForUnit = item.amount * shareFactor;
 
-                              if (item.notUmlag) {
-                                unitNichtUmlagSum += valForUnit;
-                              } else if (item.name.includes("Heiz") || item.name.includes("Warmwasser")) {
+                              if (item.category === "Ertrag") {
+                                unitErtragSum += valForUnit;
+                              } else if (item.category === "Warm-NK") {
                                 unitWarmeSum += valForUnit;
-                              } else {
+                              } else if (item.category === "Kalt-NK") {
                                 unitKalteSum += valForUnit;
                               }
 
-                              return { name: item.name, amount: valForUnit, notUmlag: item.notUmlag };
+                              return { ...item, calculatedVal: valForUnit };
                             });
 
-                            const totalUnitSum = unitKalteSum + unitWarmeSum;
+                            const totalUnitSum = unitKalteSum + unitWarmeSum + unitErtragSum;
 
                             return (
                               <div key={u.id} className="rounded-xl border border-gray-200 bg-gray-50/50 p-4">
-                                <div className="flex flex-wrap justify-between items-center mb-3 border-b border-gray-200 pb-2">
+                                <div className="flex flex-wrap justify-between items-center mb-3 border-b pb-2">
                                   <div>
                                     <span className="font-bold text-sm text-gray-900">{u.unit_number}</span>
                                     <span className="ml-3 text-xs text-gray-600 font-medium">
@@ -1139,39 +832,34 @@ export default function Home() {
                                     </span>
                                   </div>
                                   <div className="flex gap-4 text-xs font-semibold">
-                                    <span className="text-gray-600">Fläche: {pData.sqm} m²</span>
-                                    <span className="text-gray-600">Personen: {pData.persons}</span>
-                                    <span className="text-blue-600 font-bold">Gesamt (Monat): {formatEuro(totalUnitSum / 12)}</span>
+                                    <span className="text-blue-600 font-bold">Summe (Monat): {formatEuro(totalUnitSum / 12)}</span>
                                   </div>
                                 </div>
 
-                                {/* Tabelle der Einzelpositionen für diese Wohnung */}
                                 <table className="w-full text-left text-xs bg-white rounded-lg border border-gray-200 overflow-hidden">
                                   <thead className="bg-gray-100 text-gray-600">
                                     <tr>
-                                      <th className="p-2">Einzelposition</th>
+                                      <th className="p-2">Position</th>
                                       <th className="p-2">Kategorie</th>
-                                      <th className="p-2 text-right">Anteil für diese Wohnung (€ / Jahr)</th>
-                                      <th className="p-2 text-right">Monatlicher Anteil (€)</th>
+                                      <th className="p-2 text-right">Anteil (€ / Jahr)</th>
+                                      <th className="p-2 text-right">Monat (€)</th>
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-gray-100">
                                     {calculatedRows.map((row, rIdx) => (
-                                      <tr key={rIdx} className={row.notUmlag ? "bg-amber-50/50 text-amber-900" : "hover:bg-gray-50"}>
+                                      <tr key={rIdx} className={row.category === "Ertrag" ? "bg-emerald-50/60 text-emerald-900" : row.category === "Nicht umlagefähig" ? "bg-amber-50/40 text-amber-900" : "hover:bg-gray-50"}>
                                         <td className="p-2 font-medium">{row.name}</td>
-                                        <td className="p-2 text-gray-500">
-                                          {row.notUmlag ? "Nicht umlagefähig" : row.name.includes("Heiz") ? "Warme NK" : "Kalte NK"}
-                                        </td>
-                                        <td className="p-2 text-right font-semibold">{formatEuro(row.amount)}</td>
-                                        <td className="p-2 text-right text-gray-600">{formatEuro(row.amount / 12)}</td>
+                                        <td className="p-2 text-gray-500">{row.category}</td>
+                                        <td className={`p-2 text-right font-semibold ${row.calculatedVal < 0 ? "text-emerald-600" : ""}`}>{formatEuro(row.calculatedVal)}</td>
+                                        <td className="p-2 text-right text-gray-600">{formatEuro(row.calculatedVal / 12)}</td>
                                       </tr>
                                     ))}
                                   </tbody>
                                   <tfoot className="bg-gray-50 font-bold text-gray-800 border-t">
                                     <tr>
-                                      <td colSpan={2} className="p-2">Summe umlagefähige Betriebskosten</td>
-                                      <td className="p-2 text-right text-blue-600">{formatEuro(unitKalteSum + unitWarmeSum)}</td>
-                                      <td className="p-2 text-right text-blue-600">{formatEuro((unitKalteSum + unitWarmeSum) / 12)}</td>
+                                      <td colSpan={2} className="p-2">Gesamtsumme inkl. Erträge</td>
+                                      <td className="p-2 text-right text-blue-600">{formatEuro(totalUnitSum)}</td>
+                                      <td className="p-2 text-right text-blue-600">{formatEuro(totalUnitSum / 12)}</td>
                                     </tr>
                                   </tfoot>
                                 </table>
@@ -1186,170 +874,23 @@ export default function Home() {
 
                 {/* UNTERMENÜ 3: BELEGE */}
                 {bkSubTab === "belege" && (
-                  <div className="space-y-6">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-base font-bold text-gray-800">Belege für: {currentPropertyObj?.name}</h3>
-                      <button
-                        onClick={() => setShowAddOperatingCostModal(true)}
-                        className="rounded-lg bg-[#2f6fd0] px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 transition"
-                      >
-                        + Beleg für dieses Gebäude hochladen
-                      </button>
-                    </div>
-
-                    <div className="rounded-xl border border-[#e7ebf2] bg-white p-10 text-center shadow-sm">
-                      <div className="text-3xl mb-2">📂</div>
-                      <h4 className="text-sm font-bold text-gray-800">Keine Belege für {currentPropertyObj?.name} hinterlegt</h4>
-                      <p className="text-xs text-gray-500 mt-1">Laden Sie Rechnungen hoch, um sie direkt diesem Gebäude zuzuordnen.</p>
-                      <button
-                        onClick={() => setShowAddOperatingCostModal(true)}
-                        className="mt-4 rounded-lg border border-blue-600 px-4 py-2 text-xs font-semibold text-blue-600 hover:bg-blue-50 transition"
-                      >
-                        Beleg hochladen
-                      </button>
-                    </div>
+                  <div className="rounded-xl border border-[#e7ebf2] bg-white p-10 text-center shadow-sm">
+                    <div className="text-3xl mb-2">📂</div>
+                    <h4 className="text-sm font-bold text-gray-800">Belege für {currentPropertyObj?.name}</h4>
                   </div>
                 )}
               </div>
             )}
 
-            {/* ANDERE SEITEN PLATZHALTER */}
-            {["Dokumente", "Termine & Aufgaben", "Schäden & Vorgänge", "Dienstleister", "Berichte", "Einstellungen"].includes(activePage) && (
+            {["Objekte", "Einheiten", "Mieter", "Zahlungen", "Dokumente", "Termine & Aufgaben", "Schäden & Vorgänge", "Dienstleister", "Berichte", "Einstellungen"].includes(activePage) && activePage !== "Betriebskosten" && (
               <div className="rounded-xl border border-[#e7ebf2] bg-white p-12 text-center text-gray-500">
-                Bereich &quot;{activePage}&quot; wird als Nächstes ausgebaut.
+                Bereich &quot;{activePage}&quot; aktiv.
               </div>
             )}
           </div>
         </main>
       </div>
-
-      {/* MODAL: BELEG ERFASSEN */}
-      {showAddOperatingCostModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
-            <div className="mb-4 flex items-center justify-between border-b pb-3">
-              <h3 className="text-lg font-bold text-gray-900">Beleg / Rechnung erfassen</h3>
-              <button onClick={() => setShowAddOperatingCostModal(false)} className="text-xl font-bold text-gray-400 hover:text-gray-600">&times;</button>
-            </div>
-
-            <form onSubmit={handleCreateOperatingCost} className="space-y-4">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-gray-700">Gebäude / Objekt auswählen</label>
-                <select
-                  className="w-full rounded-lg border border-gray-300 p-2 text-sm font-semibold text-blue-900 bg-blue-50"
-                  value={newOperatingCost.property_id}
-                  onChange={(e) => setNewOperatingCost({ ...newOperatingCost, property_id: e.target.value })}
-                  required
-                >
-                  <option value="">Bitte Gebäude wählen</option>
-                  {properties.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name} ({p.city})</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-gray-700">Kostenarten</label>
-                  <select
-                    className="w-full rounded-lg border border-gray-300 p-2 text-sm"
-                    value={newOperatingCost.kategorie}
-                    onChange={(e) => setNewOperatingCost({ ...newOperatingCost, kategorie: e.target.value })}
-                  >
-                    <option value="Abfallentsorgung">Abfallentsorgung</option>
-                    <option value="Heizkosten gemäß Fremdabrechner">Heizkosten gemäß Fremdabrechner</option>
-                    <option value="Reparaturen (Nicht umlagefähig)">Reparaturen (Nicht umlagefähig)</option>
-                    <option value="Verwalterentgelt">Verwalterentgelt</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-gray-700">Gesamtbetrag (€)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="0.00"
-                    className="w-full rounded-lg border border-gray-300 p-2 text-sm"
-                    value={newOperatingCost.betrag}
-                    onChange={(e) => setNewOperatingCost({ ...newOperatingCost, betrag: e.target.value })}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-end space-x-3 border-t pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowAddOperatingCostModal(false)}
-                  className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-                >
-                  Abbrechen
-                </button>
-                <button
-                  type="submit"
-                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-                >
-                  Beleg für Gebäude speichern
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
-  );
-}
-
-function CostItemRow({ label, defaultActive, overrideKey, defaultAmount }: { label: string; defaultActive: boolean; overrideKey: string; defaultAmount: string }) {
-  const [active, setActive] = useState(defaultActive);
-  const [keyType, setKeyType] = useState(overrideKey);
-  const [amount, setAmount] = useState(defaultAmount);
-
-  useEffect(() => {
-    if (overrideKey) {
-      setKeyType(overrideKey);
-    }
-  }, [overrideKey]);
-
-  return (
-    <tr className="hover:bg-gray-50">
-      <td className="p-2.5 text-center">
-        <input
-          type="checkbox"
-          checked={active}
-          onChange={(e) => setActive(e.target.checked)}
-          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-        />
-      </td>
-      <td className={`p-2.5 font-medium ${!active ? "text-gray-400 line-through" : "text-gray-800"}`}>
-        {label}
-      </td>
-      <td className="p-2.5">
-        <select
-          value={keyType}
-          onChange={(e) => setKeyType(e.target.value)}
-          disabled={!active}
-          className="rounded border border-gray-200 p-1 text-xs bg-gray-50 disabled:opacity-50 font-medium"
-        >
-          <option value="Wohnfläche (m²)">Wohnfläche (m²)</option>
-          <option value="Anteile (1000stel)">Anteile (1000stel)</option>
-          <option value="Personen / Einheiten">Personen / Einheiten</option>
-          <option value="Verbrauch / m²">Verbrauch / m²</option>
-          <option value="Stück">Stück</option>
-          <option value="Pauschal">Pauschal</option>
-        </select>
-      </td>
-      <td className="p-2.5 text-right">
-        <input
-          type="number"
-          step="0.01"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          disabled={!active}
-          className="w-28 rounded border border-gray-200 p-1 text-right text-xs bg-gray-50 disabled:opacity-50 font-semibold"
-        />
-      </td>
-    </tr>
   );
 }
 
