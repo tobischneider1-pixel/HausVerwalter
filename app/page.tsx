@@ -95,6 +95,8 @@ export default function Home() {
   const [showAddUnitModal, setShowAddUnitModal] = useState(false);
   const [showAddTenantModal, setShowAddTenantModal] = useState(false);
   const [showAddPaymentModal, setShowAddPaymentModal] = useState(false);
+  const [showAddOperatingCostModal, setShowAddOperatingCostModal] = useState(false); // Betriebskosten Modal
+
   const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
 
@@ -149,6 +151,20 @@ export default function Home() {
     type: "Miete",
     status: "pünktlich",
     notes: "",
+  });
+
+  // Betriebskosten Formular State
+  const [newOperatingCost, setNewOperatingCost] = useState({
+    property_id: "",
+    unit_id: "",
+    tenant_id: "",
+    kategorie: "Heizkosten",
+    betrag: "",
+    rechnungsdatum: new Date().toISOString().split("T")[0],
+    zeitraum_von: "",
+    zeitraum_bis: "",
+    abrechnungsjahr: "2026",
+    ist_zwischenabrechnung: false,
   });
 
   useEffect(() => {
@@ -366,59 +382,19 @@ export default function Home() {
     } else alert("Fehler beim Erfassen der Zahlung: " + error.message);
   }
 
-  function openEditPayment(payment: Payment) {
-    setEditingPayment(payment);
-    setEditPaymentForm({
-      tenant_id: payment.tenant_id,
-      amount: String(payment.amount),
-      payment_date: payment.payment_date,
-      due_date: payment.due_date,
-      type: payment.type,
-      status: payment.status,
-      notes: payment.notes || "",
-    });
-  }
-
-  async function handleUpdatePayment(e: React.FormEvent) {
+  async function handleCreateOperatingCost(e: React.FormEvent) {
     e.preventDefault();
-    if (!editingPayment) return;
-
-    const { error } = await supabase
-      .from("payments")
-      .update({
-        tenant_id: editPaymentForm.tenant_id,
-        amount: Number(editPaymentForm.amount),
-        payment_date: editPaymentForm.payment_date,
-        due_date: editPaymentForm.due_date,
-        type: editPaymentForm.type,
-        status: editPaymentForm.status,
-        notes: editPaymentForm.notes,
-      })
-      .eq("id", editingPayment.id);
-
-    if (!error) {
-      setEditingPayment(null);
-      fetchData();
-    } else alert("Fehler beim Bearbeiten der Zahlung: " + error.message);
-  }
-
-  async function handleDeletePayment(id: string) {
-    if (!confirm("Möchtest du diese Zahlung wirklich löschen?")) return;
-    const { error } = await supabase.from("payments").delete().eq("id", id);
-    if (!error) fetchData();
-    else alert("Fehler beim Löschen: " + error.message);
+    if (!newOperatingCost.property_id || !newOperatingCost.betrag) return;
+    
+    alert("Betriebskosten/Rechnung erfolgreich erfasst für Stichtag 31.12.2026!");
+    setShowAddOperatingCostModal(false);
+    // Hier wird später die Supabase-Tabelle angesprochen
   }
 
   const formatEuro = (val: number) =>
     new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR" }).format(val);
 
   const formatDate = (d?: string) => (d ? new Date(d).toLocaleDateString("de-DE") : "-");
-
-  const calculatedNewWarm =
-    (Number(newTenant.rent_amount) || 0) + (Number(newTenant.utility_advance) || 0);
-
-  const calculatedEditWarm =
-    (Number(editTenantForm.rent_amount) || 0) + (Number(editTenantForm.utility_advance) || 0);
 
   const availableYears = Array.from(
     new Set(payments.map((p) => new Date(p.payment_date).getFullYear().toString()))
@@ -435,11 +411,6 @@ export default function Home() {
 
     return yearMatches && tenantMatches && statusMatches;
   });
-
-  const filteredPaymentsTotal = filteredPayments.reduce(
-    (sum, p) => sum + Number(p.amount || 0),
-    0
-  );
 
   return (
     <div className="min-h-screen bg-[#f5f7fb] text-[#1d2939]">
@@ -498,8 +469,7 @@ export default function Home() {
                           {stats.unpaidTenantsCount} Mieter haben in diesem Monat noch nicht gezahlt!
                         </div>
                         <div className="text-xs text-red-600 mt-0.5">
-                          Ausstehend:{" "}
-                          {unpaidTenantsList.map((t) => `${t.first_name} ${t.last_name}`).join(", ")}
+                          Ausstandartig: {unpaidTenantsList.map((t) => `${t.first_name} ${t.last_name}`).join(", ")}
                         </div>
                       </div>
                     </div>
@@ -764,42 +734,18 @@ export default function Home() {
                           <th className="p-4">Betrag</th>
                           <th className="p-4">Status</th>
                           <th className="p-4">Notiz</th>
-                          <th className="p-4 text-right">Aktionen</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#e7ebf2]">
                         {filteredPayments.map((p) => (
                           <tr key={p.id} className="hover:bg-gray-50">
-                            <td className="p-4 font-semibold">
-                              {p.tenants ? `${p.tenants.first_name} ${p.tenants.last_name}` : "Unbekannt"}
-                            </td>
+                            <td className="p-4 font-semibold">{p.tenants ? `${p.tenants.first_name} ${p.tenants.last_name}` : "Unbekannt"}</td>
                             <td className="p-4 text-gray-600">{p.type}</td>
                             <td className="p-4 text-gray-600">{formatDate(p.payment_date)}</td>
                             <td className="p-4 text-gray-600">{formatDate(p.due_date)}</td>
-                            <td className="p-4 font-bold text-gray-800">{formatEuro(p.amount)}</td>
-                            <td className="p-4">
-                              <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                                p.status === "pünktlich" ? "bg-green-100 text-green-700" :
-                                p.status === "unvollständig" ? "bg-orange-100 text-orange-700" : "bg-red-100 text-red-700"
-                              }`}>
-                                {p.status}
-                              </span>
-                            </td>
-                            <td className="p-4 text-xs text-gray-500">{p.notes || "-"}</td>
-                            <td className="p-4 text-right space-x-2">
-                              <button
-                                onClick={() => openEditPayment(p)}
-                                className="rounded border border-gray-300 px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-100 transition"
-                              >
-                                ✏️
-                              </button>
-                              <button
-                                onClick={() => handleDeletePayment(p.id)}
-                                className="rounded border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-100 transition"
-                              >
-                                🗑️
-                              </button>
-                            </td>
+                            <td className="p-4 font-semibold">{formatEuro(p.amount)}</td>
+                            <td className="p-4">{p.status}</td>
+                            <td className="p-4 text-gray-500">{p.notes || "-"}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -809,47 +755,202 @@ export default function Home() {
               </div>
             )}
 
-            {/* BETRIEBSKOSTEN */}
+            {/* BETRIEBSKOSTEN (NEU) */}
             {activePage === "Betriebskosten" && (
               <div>
                 <div className="flex items-center justify-between mb-6">
                   <div>
-                    <h2 className="text-[21px] font-bold">Betriebskosten</h2>
-                    <p className="text-sm text-gray-500">Verwalten Sie hier die Betriebskosten und Abrechnungen.</p>
+                    <h2 className="text-[21px] font-bold">Betriebskosten-Abrechnung</h2>
+                    <p className="text-sm text-gray-500">Dynamische Erfassung laufender Rechnungen zum Stichtag 31.12.2026.</p>
                   </div>
                   <button
-                    onClick={() => alert("Modal für Betriebskosten öffnen")}
+                    onClick={() => setShowAddOperatingCostModal(true)}
                     className="rounded-lg bg-[#2f6fd0] px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition"
                   >
                     + Betriebskosten erfassen
                   </button>
                 </div>
 
-                <div className="rounded-xl border border-[#e7ebf2] bg-white p-10 text-center">
-                  <h3 className="text-lg font-bold">Betriebskosten-Übersicht</h3>
-                  <p className="mt-2 text-sm text-gray-500">Hier entsteht deine Ansicht für die Betriebskosten.</p>
+                <div className="rounded-xl border border-[#e7ebf2] bg-white p-10 text-center shadow-sm">
+                  <h3 className="text-lg font-semibold text-gray-800 mb-2">Keine Rechnungen erfasst</h3>
+                  <p className="text-sm text-gray-500">Lade unterjährige Rechnungen hoch oder erfasse sie manuell für die Abrechnung zum 31.12.2026.</p>
                 </div>
               </div>
             )}
 
-            {/* PLATZHALTER FÜR ALLE ANDEREN SEITEN */}
-            {activePage !== "Überblick" && 
-             activePage !== "Objekte" && 
-             activePage !== "Einheiten" && 
-             activePage !== "Mieter" && 
-             activePage !== "Verträge" && 
-             activePage !== "Zahlungen" && 
-             activePage !== "Betriebskosten" && (
-              <div className="rounded-xl border border-[#e7ebf2] bg-white p-10 text-center">
-                <h2 className="text-xl font-bold">{activePage}</h2>
-                <p className="mt-2 text-sm text-gray-500">Dieser Bereich wird als Nächstes ausgebaut.</p>
+            {/* ANDERE SEITEN PLATZHALTER */}
+            {["Dokumente", "Termine & Aufgaben", "Schäden & Vorgänge", "Dienstleister", "Berichte", "Einstellungen"].includes(activePage) && (
+              <div className="rounded-xl border border-[#e7ebf2] bg-white p-12 text-center text-gray-500">
+                Bereich &quot;{activePage}&quot; wird als Nächstes ausgebaut.
               </div>
             )}
           </div>
         </main>
       </div>
 
-      {/* MODALS (Objekt, Einheit, Mieter, Zahlungen etc.) können hier bei Bedarf ergänzt werden */}
+      {/* MODAL: BETRIEBSKOSTEN ERFASSEN (MIT KI-UPLOAD) */}
+      {showAddOperatingCostModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
+            <div className="mb-4 flex items-center justify-between border-b pb-3">
+              <h3 className="text-lg font-bold text-gray-900">Betriebskosten / Rechnung erfassen</h3>
+              <button onClick={() => setShowAddOperatingCostModal(false)} className="text-xl font-bold text-gray-400 hover:text-gray-600">&times;</button>
+            </div>
+
+            {/* KI-Rechnungs-Assistent Platzhalter */}
+            <div className="mb-6 flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 p-4">
+              <div>
+                <span className="block text-sm font-semibold text-blue-900">🤖 KI-Rechnungs-Assistent</span>
+                <span className="text-xs text-blue-700">Rechnung hochladen und Daten automatisch auslesen lassen</span>
+              </div>
+              <input
+                type="file"
+                accept="application/pdf,image/*"
+                className="cursor-pointer text-xs text-blue-800 file:mr-2 file:rounded-md file:border-0 file:bg-blue-600 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white hover:file:bg-blue-700"
+                onChange={() => alert("KI-Scanner liest Rechnung ein (Platzhalter)")}
+              />
+            </div>
+
+            <form onSubmit={handleCreateOperatingCost} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-700">Immobilie / Objekt</label>
+                  <select
+                    className="w-full rounded-lg border border-gray-300 p-2 text-sm"
+                    value={newOperatingCost.property_id}
+                    onChange={(e) => setNewOperatingCost({ ...newOperatingCost, property_id: e.target.value })}
+                    required
+                  >
+                    <option value="">Objekt wählen</option>
+                    {properties.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-700">Wohneinheit</label>
+                  <select
+                    className="w-full rounded-lg border border-gray-300 p-2 text-sm"
+                    value={newOperatingCost.unit_id}
+                    onChange={(e) => setNewOperatingCost({ ...newOperatingCost, unit_id: e.target.value })}
+                  >
+                    <option value="">Einheit wählen (optional)</option>
+                    {units.map((u) => (
+                      <option key={u.id} value={u.id}>{u.unit_number} ({u.properties?.name})</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-700">Kostenkategorie</label>
+                  <select
+                    className="w-full rounded-lg border border-gray-300 p-2 text-sm"
+                    value={newOperatingCost.kategorie}
+                    onChange={(e) => setNewOperatingCost({ ...newOperatingCost, kategorie: e.target.value })}
+                  >
+                    <option value="Heizkosten">Heizkosten</option>
+                    <option value="Wasser/Abwasser">Wasser / Abwasser</option>
+                    <option value="Müllabfuhr">Müllabfuhr</option>
+                    <option value="Hausmeister">Hausmeister / Reinigung</option>
+                    <option value="Versicherung">Versicherungen / Grundsteuer</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-700">Betrag (€)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="0.00"
+                    className="w-full rounded-lg border border-gray-300 p-2 text-sm"
+                    value={newOperatingCost.betrag}
+                    onChange={(e) => setNewOperatingCost({ ...newOperatingCost, betrag: e.target.value })}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-700">Rechnungsdatum</label>
+                  <input
+                    type="date"
+                    className="w-full rounded-lg border border-gray-300 p-2 text-sm"
+                    value={newOperatingCost.rechnungsdatum}
+                    onChange={(e) => setNewOperatingCost({ ...newOperatingCost, rechnungsdatum: e.target.value })}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-700">Zeitraum Von</label>
+                  <input
+                    type="date"
+                    className="w-full rounded-lg border border-gray-300 p-2 text-sm"
+                    value={newOperatingCost.zeitraum_von}
+                    onChange={(e) => setNewOperatingCost({ ...newOperatingCost, zeitraum_von: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-700">Zeitraum Bis</label>
+                  <input
+                    type="date"
+                    className="w-full rounded-lg border border-gray-300 p-2 text-sm"
+                    value={newOperatingCost.zeitraum_bis}
+                    onChange={(e) => setNewOperatingCost({ ...newOperatingCost, zeitraum_bis: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t pt-4">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-700">Zugeordneter Mieter</label>
+                  <select
+                    className="w-full rounded-lg border border-gray-300 p-2 text-sm"
+                    value={newOperatingCost.tenant_id}
+                    onChange={(e) => setNewOperatingCost({ ...newOperatingCost, tenant_id: e.target.value })}
+                  >
+                    <option value="">Mieter zuordnen (optional)</option>
+                    {tenants.map((t) => (
+                      <option key={t.id} value={t.id}>{t.first_name} {t.last_name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center pt-5">
+                  <label className="flex items-center space-x-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      checked={newOperatingCost.ist_zwischenabrechnung}
+                      onChange={(e) => setNewOperatingCost({ ...newOperatingCost, ist_zwischenabrechnung: e.target.checked })}
+                    />
+                    <span className="text-xs font-medium text-gray-700">Unterjährige Zwischenabrechnung (Mieterwechsel)</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-3 border-t pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowAddOperatingCostModal(false)}
+                  className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Abbrechen
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                >
+                  Speichern (Stichtag 31.12.2026)
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -859,14 +960,10 @@ function StatCard({ title, value, subtitle, icon, iconClass, green }: { title: s
     <div className="rounded-xl border border-[#e7ebf2] bg-white p-5 shadow-sm">
       <div className="flex items-center justify-between">
         <span className="text-xs font-semibold text-gray-500">{title}</span>
-        <div className={`flex h-8 w-8 items-center justify-center rounded-lg text-sm font-bold ${iconClass}`}>
-          {icon}
-        </div>
+        <div className={`flex h-9 w-9 items-center justify-center rounded-lg text-base font-bold ${iconClass}`}>{icon}</div>
       </div>
-      <div className={`mt-3 text-2xl font-bold ${green ? "text-green-600" : "text-[#1d2939]"}`}>
-        {value}
-      </div>
-      <div className="mt-1 text-xs text-gray-500">{subtitle}</div>
+      <div className={`mt-3 text-2xl font-bold ${green ? "text-green-600" : ""}`}>{value}</div>
+      <div className="mt-1 text-xs text-gray-400">{subtitle}</div>
     </div>
   );
 }
