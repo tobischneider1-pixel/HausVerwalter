@@ -1,14 +1,12 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 import { Property, Tenant, Unit } from "@/types";
 
 interface Props {
-  properties: Property[];
-  units: Unit[];
-  tenants: Tenant[];
+  properties?: Property[];
+  units?: Unit[];
+  tenants?: Tenant[];
 }
 
 export type CostCategoryType = "cold" | "warm" | "non_reclaimable";
@@ -45,25 +43,21 @@ const DEFAULT_COST_ITEMS: Omit<CostRow, "id">[] = [
   { active: false, category: "Instandhaltungsrücklage / Reparaturen", key: "Direktzuordnung", amount: 1200.0, type: "non_reclaimable" },
 ];
 
-export function OperatingCostsTab({ properties, units, tenants }: Props) {
+export function OperatingCostsTab({ properties = [], units = [], tenants = [] }: Props) {
   const [subTab, setSubTab] = useState<"costs" | "split" | "belege">("costs");
   const [selectedPropertyId, setSelectedPropertyId] = useState(properties[0]?.id || "");
   const [selectedTenantId, setSelectedTenantId] = useState(tenants[0]?.id || "");
   const [year, setYear] = useState("2025");
   const [globalKey, setGlobalKey] = useState("Wohnfläche (m²)");
 
-  // Kosten-Daten
   const [costs, setCosts] = useState<CostRow[]>(
     DEFAULT_COST_ITEMS.map((item, idx) => ({ ...item, id: idx.toString() }))
   );
 
-  // Parameter für Verteilungsschlüssel (Wohnung vs. Gesamt)
   const [unitSqm, setUnitSqm] = useState(75);
   const [totalSqm, setTotalSqm] = useState(175);
-  
   const [unitShares, setUnitShares] = useState(429);
   const [totalShares, setTotalShares] = useState(1000);
-  
   const [unitPersons, setUnitPersons] = useState(2);
   const [totalPersons, setTotalPersons] = useState(6);
 
@@ -71,7 +65,6 @@ export function OperatingCostsTab({ properties, units, tenants }: Props) {
   const selectedTenant = tenants.find((t) => t.id === selectedTenantId) || tenants[0];
   const selectedUnit = units.find((u) => u.id === selectedTenant?.unit_id);
 
-  // Automatische Anpassung bei Mieter-Auswahl
   useEffect(() => {
     if (selectedUnit?.size_sqm) {
       setUnitSqm(selectedUnit.size_sqm);
@@ -81,7 +74,6 @@ export function OperatingCostsTab({ properties, units, tenants }: Props) {
     if (sumSqm > 0) setTotalSqm(sumSqm);
   }, [selectedTenantId, selectedPropertyId, units, selectedUnit]);
 
-  // Berechnung des Anteils je Kostenart
   const calculateItemShare = (item: CostRow): number => {
     if (item.key === "Anteile (1000stel)") {
       return item.amount * (unitShares / (totalShares || 1));
@@ -92,7 +84,6 @@ export function OperatingCostsTab({ properties, units, tenants }: Props) {
     if (item.key === "Direktzuordnung") {
       return item.amount;
     }
-    // Standard: Wohnfläche (m²)
     return item.amount * (unitSqm / (totalSqm || 1));
   };
 
@@ -120,52 +111,62 @@ export function OperatingCostsTab({ properties, units, tenants }: Props) {
     setCosts(costs.map((c) => ({ ...c, key })));
   }
 
-  function generatePDF() {
+  // PDF-Generierung mit dynamischem Import (verhindert Next.js Server-Crash)
+  const generatePDF = async () => {
+    if (typeof window === "undefined") return;
     if (!selectedProperty || !selectedTenant) {
       alert("Bitte wählen Sie ein Objekt und einen Mieter aus.");
       return;
     }
 
-    const doc = new jsPDF();
-    doc.setFontSize(16);
-    doc.setFont("helvetica", "bold");
-    doc.text(`Nebenkostenabrechnung ${year}`, 14, 20);
+    try {
+      const { default: jsPDF } = await import("jspdf");
+      const { default: autoTable } = await import("jspdf-autotable");
 
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "normal");
-    doc.text(`Objekt: ${selectedProperty.name}, ${selectedProperty.address}`, 14, 28);
-    doc.text(`Mieter: ${selectedTenant.first_name} ${selectedTenant.last_name}`, 14, 34);
-    doc.text(`Einheit: ${selectedUnit?.unit_number || "Wohnung"} (${unitSqm} m²)`, 14, 40);
+      const doc = new jsPDF();
+      doc.setFontSize(16);
+      doc.setFont("helvetica", "bold");
+      doc.text(`Nebenkostenabrechnung ${year}`, 14, 20);
 
-    const tableData = activeReclaimableCosts.map((item) => [
-      item.category,
-      item.key,
-      `${item.amount.toFixed(2)} €`,
-      `${calculateItemShare(item).toFixed(2)} €`,
-    ]);
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "normal");
+      doc.text(`Objekt: ${selectedProperty.name}, ${selectedProperty.address}`, 14, 28);
+      doc.text(`Mieter: ${selectedTenant.first_name} ${selectedTenant.last_name}`, 14, 34);
+      doc.text(`Einheit: ${selectedUnit?.unit_number || "Wohnung"} (${unitSqm} m²)`, 14, 40);
 
-    autoTable(doc, {
-      startY: 48,
-      head: [["Kostenart", "Verteilerschlüssel", "Gesamtkosten", "Anteil Mieter"]],
-      body: tableData,
-      theme: "striped",
-      headStyles: { fillColor: [30, 41, 59] },
-    });
+      const tableData = activeReclaimableCosts.map((item) => [
+        item.category,
+        item.key,
+        `${item.amount.toFixed(2)} €`,
+        `${calculateItemShare(item).toFixed(2)} €`,
+      ]);
 
-    const finalY = (doc as any).lastAutoTable.finalY + 10;
-    doc.text(`Gesamtkosten Anteil Mieter: ${tenantShareTotal.toFixed(2)} €`, 14, finalY);
-    doc.text(`Geleistete Vorauszahlungen: -${annualAdvance.toFixed(2)} €`, 14, finalY + 6);
-    doc.setFont("helvetica", "bold");
-    doc.text(
-      balance >= 0
-        ? `Nachzahlung: ${balance.toFixed(2)} €`
-        : `Guthaben: ${Math.abs(balance).toFixed(2)} €`,
-      14,
-      finalY + 14
-    );
+      autoTable(doc, {
+        startY: 48,
+        head: [["Kostenart", "Verteilerschlüssel", "Gesamtkosten", "Anteil Mieter"]],
+        body: tableData,
+        theme: "striped",
+        headStyles: { fillColor: [30, 41, 59] },
+      });
 
-    doc.save(`Betriebskosten_${year}_${selectedTenant.last_name}.pdf`);
-  }
+      const finalY = (doc as any).lastAutoTable.finalY + 10;
+      doc.text(`Gesamtkosten Anteil Mieter: ${tenantShareTotal.toFixed(2)} €`, 14, finalY);
+      doc.text(`Geleistete Vorauszahlungen: -${annualAdvance.toFixed(2)} €`, 14, finalY + 6);
+      doc.setFont("helvetica", "bold");
+      doc.text(
+        balance >= 0
+          ? `Nachzahlung: ${balance.toFixed(2)} €`
+          : `Guthaben: ${Math.abs(balance).toFixed(2)} €`,
+        14,
+        finalY + 14
+      );
+
+      doc.save(`Betriebskosten_${year}_${selectedTenant.last_name}.pdf`);
+    } catch (error) {
+      console.error("PDF-Erstellung fehlgeschlagen:", error);
+      alert("Fehler beim Erstellen der PDF-Datei.");
+    }
+  };
 
   const renderCostTable = (title: string, categoryType: CostCategoryType, description?: string) => {
     const sectionCosts = costs.filter((c) => c.type === categoryType);
@@ -312,7 +313,7 @@ export function OperatingCostsTab({ properties, units, tenants }: Props) {
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-6">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <h3 className="font-bold text-slate-900 text-sm">
-              Bewirtschaftung für: <span className="text-blue-600">{selectedProperty?.name}</span> ({year})
+              Bewirtschaftung für: <span className="text-blue-600">{selectedProperty?.name || "Objekt"}</span> ({year})
             </h3>
             <div className="flex items-center gap-2">
               <span className="text-slate-500 font-medium">Globaler Schlüssel:</span>
@@ -351,7 +352,6 @@ export function OperatingCostsTab({ properties, units, tenants }: Props) {
       {/* SUBTAB 2: Aufteilung nach Wohnung */}
       {subTab === "split" && (
         <div className="space-y-6">
-          {/* Kopfzeile & Mieterwahl */}
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h3 className="font-bold text-slate-900 text-sm">Abrechnung pro Mieter & Wohnung zuordnen</h3>
@@ -371,10 +371,10 @@ export function OperatingCostsTab({ properties, units, tenants }: Props) {
               </div>
             </div>
 
-            {/* Wohnungs-Parameter Eingabemaske */}
+            {/* Wohnungs-Parameter */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-lg border border-slate-200/80">
               <div className="space-y-1">
-                <label className="font-semibold block text-slate-700">Wohnfläche ($\text{m}^2$)</label>
+                <label className="font-semibold block text-slate-700">Wohnfläche (m²)</label>
                 <div className="flex items-center gap-2">
                   <input
                     type="number"
@@ -389,7 +389,7 @@ export function OperatingCostsTab({ properties, units, tenants }: Props) {
                     onChange={(e) => setTotalSqm(parseFloat(e.target.value) || 0)}
                     className="w-24 rounded border border-slate-300 p-1.5 bg-white font-semibold text-center"
                   />
-                  <span className="text-slate-500 font-medium">$\text{m}^2$ gesamt</span>
+                  <span className="text-slate-500 font-medium">m² gesamt</span>
                 </div>
               </div>
 
@@ -451,7 +451,7 @@ export function OperatingCostsTab({ properties, units, tenants }: Props) {
             </div>
           </div>
 
-          {/* Einzelkosten-Tabelle für die gewählte Wohnung */}
+          {/* Einzelkosten-Tabelle */}
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
             <h4 className="font-bold text-slate-900 text-sm border-b border-slate-100 pb-2">
               Einzelkosten-Aufschlüsselung für {selectedTenant?.first_name} {selectedTenant?.last_name}
@@ -511,7 +511,7 @@ export function OperatingCostsTab({ properties, units, tenants }: Props) {
       {/* SUBTAB 3: Belege */}
       {subTab === "belege" && (
         <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-sm text-center text-slate-500">
-          📂 Hier können Belege und Rechnungen für {selectedProperty?.name} hochgeladen und verwaltet werden.
+          📂 Hier können Belege und Rechnungen für {selectedProperty?.name || "Objekt"} hochgeladen und verwaltet werden.
         </div>
       )}
     </div>
