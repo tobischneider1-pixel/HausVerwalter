@@ -90,7 +90,7 @@ export default function Home() {
   const [paymentFilterTenant, setPaymentFilterTenant] = useState<string>("all");
   const [paymentFilterStatus, setPaymentFilterStatus] = useState<string>("all");
 
-  // Betriebskosten Unter-Tabs ("abrechnung" oder "belege")
+  // Betriebskosten Unter-Tabs
   const [bkSubTab, setBkSubTab] = useState<"abrechnung" | "belege">("abrechnung");
   const [selectedPropertyForBk, setSelectedPropertyForBk] = useState<string>("");
   const [bkYear, setBkYear] = useState<string>("2026");
@@ -100,7 +100,7 @@ export default function Home() {
   const [showAddUnitModal, setShowAddUnitModal] = useState(false);
   const [showAddTenantModal, setShowAddTenantModal] = useState(false);
   const [showAddPaymentModal, setShowAddPaymentModal] = useState(false);
-  const [showAddOperatingCostModal, setShowAddOperatingCostModal] = useState(false); // Beleg erfassen Modal
+  const [showAddOperatingCostModal, setShowAddOperatingCostModal] = useState(false);
 
   const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
 
@@ -147,7 +147,6 @@ export default function Home() {
     notes: "",
   });
 
-  // Betriebskosten / Beleg Formular State (für den Upload-Bereich)
   const [newOperatingCost, setNewOperatingCost] = useState({
     property_id: "",
     unit_id: "",
@@ -839,8 +838,8 @@ export default function Home() {
                             <CostItemRow label="Müllabfuhr (kalt)" defaultActive={true} defaultKey="Personen / Einheiten" defaultAmount="640.00" />
                             <CostItemRow label="Wasser / Abwasser (kalt)" defaultActive={true} defaultKey="Wasserzähler (m³)" defaultAmount="1100.00" />
                             <CostItemRow label="Hausmeister / Reinigung (kalt)" defaultActive={true} defaultKey="Wohnfläche (m²)" defaultAmount="1500.00" />
-                            <CostItemRow label="Grundsteuer (kalt)" defaultActive={true} defaultKey="Wohnfläche (m²)" defaultAmount="950.00" />
-                            <CostItemRow label="Gebäudeversicherung (kalt)" defaultActive={true} defaultKey="Wohnfläche (m²)" defaultAmount="780.00" />
+                            <CostItemRow label="Grundsteuer (kalt)" defaultActive={true} defaultKey="Anteile (1000stel)" defaultAmount="950.00" />
+                            <CostItemRow label="Gebäudeversicherung (kalt)" defaultActive={true} defaultKey="Anteile (1000stel)" defaultAmount="780.00" />
                             <CostItemRow label="Gartenpflege (kalt)" defaultActive={false} defaultKey="Wohnfläche (m²)" defaultAmount="0.00" />
                           </tbody>
                         </table>
@@ -1081,6 +1080,7 @@ function CostItemRow({ label, defaultActive, defaultKey, defaultAmount }: { labe
           className="rounded border border-gray-200 p-1 text-xs bg-gray-50 disabled:opacity-50"
         >
           <option value="Wohnfläche (m²)">Wohnfläche (m²)</option>
+          <option value="Anteile (1000stel)">Anteile (1000stel)</option>
           <option value="Personen / Einheiten">Personen / Einheiten</option>
           <option value="Verbrauch / m²">Verbrauch / m²</option>
           <option value="Wasserzähler (m³)">Wasserzähler (m³)</option>
