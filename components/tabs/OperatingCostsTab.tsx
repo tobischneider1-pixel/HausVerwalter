@@ -11,224 +11,320 @@ interface Props {
   tenants: Tenant[];
 }
 
-interface CostItem {
+interface CostRow {
   id: string;
+  active: boolean;
   category: string;
+  key: string;
   amount: number;
 }
 
+const DEFAULT_COST_ITEMS: Omit<CostRow, "id">[] = [
+  { active: true, category: "Abfallentsorgung", key: "Anteile (1000stel)", amount: 1310.4 },
+  { active: true, category: "Oberflächenwasser", key: "Wohnfläche (m²)", amount: 210.0 },
+  { active: true, category: "Straßenreinigung", key: "Wohnfläche (m²)", amount: 150.0 },
+  { active: true, category: "Gebäudehaftpflichtversicherung", key: "Wohnfläche (m²)", amount: 320.0 },
+  { active: true, category: "Geb.-Vers. Leitungswasser/Sturm", key: "Wohnfläche (m²)", amount: 780.0 },
+  { active: true, category: "Glasbruchversicherung", key: "Wohnfläche (m²)", amount: 120.0 },
+  { active: true, category: "Strom (Beleuchtung)", key: "Personen / Einheiten", amount: 190.0 },
+  { active: true, category: "Gartenpflege (Fremdfirma)", key: "Wohnfläche (m²)", amount: 850.0 },
+  { active: true, category: "Reinigung (Fremdfirma)", key: "Wohnfläche (m²)", amount: 1200.0 },
+  { active: true, category: "Hausmeister (Fremdfirma)", key: "Wohnfläche (m²)", amount: 1500.0 },
+];
+
 export function OperatingCostsTab({ properties, units, tenants }: Props) {
-  const [selectedPropertyId, setSelectedPropertyId] = useState("");
-  const [selectedTenantId, setSelectedTenantId] = useState("");
+  const [subTab, setSubTab] = useState<"costs" | "split" | "belege">("costs");
+  const [selectedPropertyId, setSelectedPropertyId] = useState(properties[0]?.id || "");
+  const [selectedTenantId, setSelectedTenantId] = useState(tenants[0]?.id || "");
   const [year, setYear] = useState("2025");
+  const [globalKey, setGlobalKey] = useState("Wohnfläche (m²)");
 
-  const [costs, setCosts] = useState<CostItem[]>([
-    { id: "1", category: "Heizung & Warmwasser", amount: 1200 },
-    { id: "2", category: "Grundsteuer", amount: 350 },
-    { id: "3", category: "Gebäudeversicherung", amount: 480 },
-    { id: "4", category: "Müllabfuhr & Straßenreinigung", amount: 260 },
-  ]);
+  const [costs, setCosts] = useState<CostRow[]>(
+    DEFAULT_COST_ITEMS.map((item, idx) => ({ ...item, id: idx.toString() }))
+  );
 
-  const [newCategory, setNewCategory] = useState("");
-  const [newAmount, setNewAmount] = useState("");
-
-  const selectedProperty = properties.find((p) => p.id === selectedPropertyId);
-  const selectedTenant = tenants.find((t) => t.id === selectedTenantId);
+  const selectedProperty = properties.find((p) => p.id === selectedPropertyId) || properties[0];
+  const selectedTenant = tenants.find((t) => t.id === selectedTenantId) || tenants[0];
   const selectedUnit = units.find((u) => u.id === selectedTenant?.unit_id);
 
-  // Gesamtfläche des Objekts berechnen
   const totalPropertySqm = units
     .filter((u) => u.property_id === selectedPropertyId)
     .reduce((sum, u) => sum + (u.size_sqm || 0), 0) || 1;
 
-  const totalCosts = costs.reduce((sum, item) => sum + item.amount, 0);
+  const activeCosts = costs.filter((c) => c.active);
+  const totalCosts = activeCosts.reduce((sum, item) => sum + item.amount, 0);
   const tenantSqm = selectedUnit?.size_sqm || 0;
-  const sqmShareRatio = tenantSqm / totalPropertySqm;
+  const sqmRatio = tenantSqm / totalPropertySqm;
 
-  // Anteiliger Betrag für den Mieter
-  const tenantShareTotal = totalCosts * sqmShareRatio;
+  const tenantShareTotal = totalCosts * sqmRatio;
   const annualAdvance = (selectedTenant?.utility_advance || 0) * 12;
-  const balance = tenantShareTotal - annualAdvance; // > 0 = Nachzahlung, < 0 = Guthaben
+  const balance = tenantShareTotal - annualAdvance;
 
-  function addCostItem(e: React.FormEvent) {
-    e.preventDefault();
-    if (!newCategory || !newAmount) return;
-    setCosts([
-      ...costs,
-      { id: Date.now().toString(), category: newCategory, amount: parseFloat(newAmount) || 0 },
-    ]);
-    setNewCategory("");
-    setNewAmount("");
-  }
+  const toggleCost = (id: string) => {
+    setCosts(costs.map((c) => (c.id === id ? { ...c, active: !c.active } : c)));
+  };
 
-  function removeCostItem(id: string) {
-    setCosts(costs.filter((c) => c.id !== id));
+  const updateAmount = (id: string, val: number) => {
+    setCosts(costs.map((c) => (c.id === id ? { ...c, amount: val } : c)));
+  };
+
+  const updateKey = (id: string, key: string) => {
+    setCosts(costs.map((c) => (c.id === id ? { ...c, key } : c)));
+  };
+
+  function applyGlobalKey(key: string) {
+    setGlobalKey(key);
+    setCosts(costs.map((c) => ({ ...c, key })));
   }
 
   function generatePDF() {
     if (!selectedProperty || !selectedTenant || !selectedUnit) {
-      alert("Bitte wählen Sie zuerst ein Objekt und einen Mieter aus.");
+      alert("Bitte wählen Sie ein Objekt und einen Mieter aus.");
       return;
     }
 
     const doc = new jsPDF();
-
-    // Briefkopf / Absender
     doc.setFontSize(16);
     doc.setFont("helvetica", "bold");
-    doc.text("Nebenkostenabrechnung " + year, 14, 20);
+    doc.text(`Nebenkostenabrechnung ${year}`, 14, 20);
 
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
     doc.text(`Objekt: ${selectedProperty.name}, ${selectedProperty.address}`, 14, 28);
     doc.text(`Mieter: ${selectedTenant.first_name} ${selectedTenant.last_name}`, 14, 34);
     doc.text(`Einheit: ${selectedUnit.unit_number} (${tenantSqm} m²)`, 14, 40);
-    doc.text(`Gesamtwohnfläche Objekt: ${totalPropertySqm} m²`, 14, 46);
 
-    // Tabelle für Einzelkosten
-    const tableData = costs.map((item) => {
-      const tenantItemShare = item.amount * sqmShareRatio;
-      return [
-        item.category,
-        `${item.amount.toFixed(2)} €`,
-        `${tenantSqm} / ${totalPropertySqm} m²`,
-        `${tenantItemShare.toFixed(2)} €`,
-      ];
-    });
+    const tableData = activeCosts.map((item) => [
+      item.category,
+      item.key,
+      `${item.amount.toFixed(2)} €`,
+      `${(item.amount * sqmRatio).toFixed(2)} €`,
+    ]);
 
     autoTable(doc, {
-      startY: 55,
-      head: [["Kostenart", "Gesamtkosten", "Verteilerschlüssel", "Ihr Anteil"]],
+      startY: 48,
+      head: [["Kostenart", "Verteilerschlüssel", "Gesamtkosten", "Anteil Mieter"]],
       body: tableData,
       theme: "striped",
       headStyles: { fillColor: [30, 41, 59] },
     });
 
-    // Zusammenfassung am Ende der Tabelle
     const finalY = (doc as any).lastAutoTable.finalY + 10;
-
-    doc.setFontSize(10);
-    doc.text(`Gesamtkosten Anteil Mieter:`, 14, finalY);
-    doc.text(`${tenantShareTotal.toFixed(2)} €`, 150, finalY, { align: "right" });
-
-    doc.text(`Geleistete Vorauszahlungen (12 Monate):`, 14, finalY + 6);
-    doc.text(`- ${annualAdvance.toFixed(2)} €`, 150, finalY + 6, { align: "right" });
-
+    doc.text(`Gesamtkosten Anteil Mieter: ${tenantShareTotal.toFixed(2)} €`, 14, finalY);
+    doc.text(`Geleistete Vorauszahlungen: -${annualAdvance.toFixed(2)} €`, 14, finalY + 6);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(11);
-    const resultText = balance >= 0 ? "Ihre Nachzahlung:" : "Ihr Guthaben:";
-    doc.text(resultText, 14, finalY + 14);
-    doc.text(`${Math.abs(balance).toFixed(2)} €`, 150, finalY + 14, { align: "right" });
+    doc.text(
+      balance >= 0
+        ? `Nachzahlung: ${balance.toFixed(2)} €`
+        : `Guthaben: ${Math.abs(balance).toFixed(2)} €`,
+      14,
+      finalY + 14
+    );
 
-    doc.save(`Nebenkostenabrechnung_${year}_${selectedTenant.last_name}.pdf`);
+    doc.save(`Betriebskosten_${year}_${selectedTenant.last_name}.pdf`);
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm grid grid-cols-1 md:grid-cols-3 gap-4">
+    <div className="p-6 space-y-6 text-xs text-slate-700">
+      {/* Header Bereich */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <label className="block text-xs font-semibold text-slate-700 mb-1">Objekt wählen</label>
-          <select
-            value={selectedPropertyId}
-            onChange={(e) => setSelectedPropertyId(e.target.value)}
-            className="w-full text-xs rounded border border-slate-300 p-2 bg-white"
-          >
-            <option value="">Objekt wählen...</option>
-            {properties.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
+          <h2 className="text-lg font-bold text-slate-900">Betriebskosten & Gebäude-Abrechnung</h2>
+          <p className="text-slate-500">Erfassen und aufteilen nach deinen genauen Vorlagen.</p>
         </div>
-        <div>
-          <label className="block text-xs font-semibold text-slate-700 mb-1">Mieter wählen</label>
-          <select
-            value={selectedTenantId}
-            onChange={(e) => setSelectedTenantId(e.target.value)}
-            className="w-full text-xs rounded border border-slate-300 p-2 bg-white"
-          >
-            <option value="">Mieter wählen...</option>
-            {tenants.map((t) => (
-              <option key={t.id} value={t.id}>{t.first_name} {t.last_name}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs font-semibold text-slate-700 mb-1">Abrechnungsjahr</label>
-          <input
-            type="text"
-            value={year}
-            onChange={(e) => setYear(e.target.value)}
-            className="w-full text-xs rounded border border-slate-300 p-2"
-          />
-        </div>
-      </div>
 
-      {/* Eingabe neuer Kosten */}
-      <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
-        <h3 className="text-sm font-bold text-slate-900">Betriebskosten-Positionen</h3>
-        <form onSubmit={addCostItem} className="flex gap-2 text-xs">
-          <input
-            type="text"
-            placeholder="Kostenart (z.B. Gartenpflege)"
-            value={newCategory}
-            onChange={(e) => setNewCategory(e.target.value)}
-            className="flex-1 rounded border border-slate-300 p-2"
-          />
-          <input
-            type="number"
-            step="0.01"
-            placeholder="Gesamtbetrag (€)"
-            value={newAmount}
-            onChange={(e) => setNewAmount(e.target.value)}
-            className="w-36 rounded border border-slate-300 p-2"
-          />
-          <button type="submit" className="bg-slate-900 text-white px-4 py-2 rounded font-medium hover:bg-slate-800">
-            Hinzufügen
+        {/* Sub-Navigation Pills */}
+        <div className="flex items-center gap-1 bg-slate-200/60 p-1 rounded-xl">
+          <button
+            onClick={() => setSubTab("costs")}
+            className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
+              subTab === "costs" ? "bg-white shadow-sm text-slate-900" : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            📊 Gesamtkosten erfassen
           </button>
-        </form>
-
-        <table className="w-full text-left text-xs text-slate-600 border-collapse">
-          <thead>
-            <tr className="border-b border-slate-200 text-slate-400">
-              <th className="py-2">Kostenart</th>
-              <th className="py-2">Gesamtkosten (€)</th>
-              <th className="py-2">Anteil Mieter ({tenantSqm} m²)</th>
-              <th className="py-2 text-right">Aktion</th>
-            </tr>
-          </thead>
-          <tbody>
-            {costs.map((item) => (
-              <tr key={item.id} className="border-b border-slate-100">
-                <td className="py-2 font-medium text-slate-800">{item.category}</td>
-                <td className="py-2">{item.amount.toFixed(2)} €</td>
-                <td className="py-2">{(item.amount * sqmShareRatio).toFixed(2)} €</td>
-                <td className="py-2 text-right">
-                  <button onClick={() => removeCostItem(item.id)} className="text-red-500 hover:text-red-700">
-                    Löschen
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Ergebnis & PDF Export Button */}
-      <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-        <div className="text-xs space-y-1">
-          <p className="text-slate-500">Gesamtkosten Anteil Mieter: <span className="font-bold text-slate-800">{tenantShareTotal.toFixed(2)} €</span></p>
-          <p className="text-slate-500">Geleistete Vorauszahlungen (12 Monate): <span className="font-bold text-slate-800">{annualAdvance.toFixed(2)} €</span></p>
-          <p className={`font-bold text-sm ${balance >= 0 ? "text-red-600" : "text-emerald-600"}`}>
-            {balance >= 0 ? `Nachzahlung: ${balance.toFixed(2)} €` : `Guthaben: ${Math.abs(balance).toFixed(2)} €`}
-          </p>
+          <button
+            onClick={() => setSubTab("split")}
+            className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
+              subTab === "split" ? "bg-white shadow-sm text-slate-900" : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            🏢 Aufteilung nach Wohnung
+          </button>
+          <button
+            onClick={() => setSubTab("belege")}
+            className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
+              subTab === "belege" ? "bg-white shadow-sm text-slate-900" : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            📁 Belege
+          </button>
         </div>
-        <button
-          onClick={generatePDF}
-          className="bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs px-4 py-2.5 rounded-lg transition-colors flex items-center gap-2 shadow-sm"
-        >
-          📄 PDF Abrechnung herunterladen
-        </button>
       </div>
+
+      {/* Objekt & Jahr Auswahl Bar */}
+      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-slate-500">📍 Objekt:</span>
+            <select
+              value={selectedPropertyId}
+              onChange={(e) => setSelectedPropertyId(e.target.value)}
+              className="rounded border border-slate-300 p-1.5 bg-white font-medium"
+            >
+              {properties.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} — {p.city}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-slate-500">Abrechnungsjahr:</span>
+            <select
+              value={year}
+              onChange={(e) => setYear(e.target.value)}
+              className="rounded border border-slate-300 p-1.5 bg-white font-medium"
+            >
+              <option value="2025">2025</option>
+              <option value="2024">2024</option>
+            </select>
+          </div>
+        </div>
+
+        <span className="bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-[11px] font-semibold border border-emerald-200">
+          Status: Übernommen für {selectedProperty?.name || "Objekt"} 🚀
+        </span>
+      </div>
+
+      {/* SUBTAB 1: Gesamtkosten erfassen */}
+      {subTab === "costs" && (
+        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <h3 className="font-bold text-slate-900 text-sm">
+              Bewirtschaftung für: <span className="text-blue-600">{selectedProperty?.name}</span> ({year})
+            </h3>
+            <div className="flex items-center gap-2">
+              <span className="text-slate-500 font-medium">Globaler Schlüssel:</span>
+              <select
+                value={globalKey}
+                onChange={(e) => applyGlobalKey(e.target.value)}
+                className="rounded border border-slate-300 p-1.5 bg-white"
+              >
+                <option value="Wohnfläche (m²)">Wohnfläche (m²)</option>
+                <option value="Anteile (1000stel)">Anteile (1000stel)</option>
+                <option value="Personen / Einheiten">Personen / Einheiten</option>
+              </select>
+            </div>
+          </div>
+
+          <p className="font-semibold text-slate-500 pt-1">
+            Bewirtschaftung (Kosten) – Umlagefähige kalte Betriebskosten
+          </p>
+
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="border-b border-slate-200 text-slate-400 font-semibold text-[11px]">
+                <th className="py-2 w-12">Aktiv</th>
+                <th className="py-2">Kostenart</th>
+                <th className="py-2 w-56">Verteilerschlüssel</th>
+                <th className="py-2 text-right w-40">Gesamtkosten (€)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {costs.map((item) => (
+                <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50/50">
+                  <td className="py-2.5">
+                    <input
+                      type="checkbox"
+                      checked={item.active}
+                      onChange={() => toggleCost(item.id)}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-0"
+                    />
+                  </td>
+                  <td className="py-2.5 font-medium text-slate-800">{item.category}</td>
+                  <td className="py-2.5">
+                    <select
+                      value={item.key}
+                      onChange={(e) => updateKey(item.id, e.target.value)}
+                      className="w-full rounded border border-slate-200 p-1 bg-white"
+                    >
+                      <option value="Wohnfläche (m²)">Wohnfläche (m²)</option>
+                      <option value="Anteile (1000stel)">Anteile (1000stel)</option>
+                      <option value="Personen / Einheiten">Personen / Einheiten</option>
+                      <option value="Direktzuordnung">Direktzuordnung</option>
+                    </select>
+                  </td>
+                  <td className="py-2.5 text-right">
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={item.amount}
+                      onChange={(e) => updateAmount(item.id, parseFloat(e.target.value) || 0)}
+                      className="w-32 rounded border border-slate-200 p-1 text-right font-semibold"
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div className="flex justify-between items-center pt-3 border-t border-slate-100 font-bold">
+            <span>Gesamtsumme Umlagefähig:</span>
+            <span className="text-sm text-slate-900">{totalCosts.toFixed(2)} €</span>
+          </div>
+        </div>
+      )}
+
+      {/* SUBTAB 2: Aufteilung nach Wohnung */}
+      {subTab === "split" && (
+        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <h3 className="font-bold text-slate-900 text-sm">Abrechnung pro Mieter generieren</h3>
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-slate-500">Mieter wählen:</span>
+              <select
+                value={selectedTenantId}
+                onChange={(e) => setSelectedTenantId(e.target.value)}
+                className="rounded border border-slate-300 p-1.5 bg-white"
+              >
+                {tenants.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.first_name} {t.last_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="bg-slate-50 p-4 rounded-lg space-y-2 text-xs">
+            <p><strong>Mieter:</strong> {selectedTenant?.first_name} {selectedTenant?.last_name}</p>
+            <p><strong>Wohnfläche Mieter:</strong> {tenantSqm} m² von {totalPropertySqm} m² ({((tenantSqm/totalPropertySqm)*100).toFixed(1)} %)</p>
+            <p><strong>Anteilige Gesamtkosten:</strong> {tenantShareTotal.toFixed(2)} €</p>
+            <p><strong>Geleistete Vorauszahlungen (12 Monate):</strong> {annualAdvance.toFixed(2)} €</p>
+            <p className={`font-bold text-sm ${balance >= 0 ? "text-red-600" : "text-emerald-600"}`}>
+              {balance >= 0 ? `Nachzahlung: ${balance.toFixed(2)} €` : `Guthaben: ${Math.abs(balance).toFixed(2)} €`}
+            </p>
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <button
+              onClick={generatePDF}
+              className="bg-blue-600 hover:bg-blue-500 text-white font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
+            >
+              📄 Abrechnung als PDF herunterladen
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* SUBTAB 3: Belege */}
+      {subTab === "belege" && (
+        <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-sm text-center text-slate-500">
+          📂 Hier können Belege und Rechnungen für {selectedProperty?.name} hochgeladen und verwaltet werden.
+        </div>
+      )}
     </div>
   );
 }
