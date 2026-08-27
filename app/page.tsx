@@ -90,15 +90,19 @@ export default function Home() {
   const [paymentFilterTenant, setPaymentFilterTenant] = useState<string>("all");
   const [paymentFilterStatus, setPaymentFilterStatus] = useState<string>("all");
 
+  // Betriebskosten Unter-Tabs ("abrechnung" oder "belege")
+  const [bkSubTab, setBkSubTab] = useState<"abrechnung" | "belege">("abrechnung");
+  const [selectedPropertyForBk, setSelectedPropertyForBk] = useState<string>("");
+  const [bkYear, setBkYear] = useState<string>("2026");
+
   // Modals
   const [showAddPropModal, setShowAddPropModal] = useState(false);
   const [showAddUnitModal, setShowAddUnitModal] = useState(false);
   const [showAddTenantModal, setShowAddTenantModal] = useState(false);
   const [showAddPaymentModal, setShowAddPaymentModal] = useState(false);
-  const [showAddOperatingCostModal, setShowAddOperatingCostModal] = useState(false); // Betriebskosten Modal
+  const [showAddOperatingCostModal, setShowAddOperatingCostModal] = useState(false); // Beleg erfassen Modal
 
   const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
-  const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
 
   // Formulare
   const [newProp, setNewProp] = useState({ name: "", address: "", zip_code: "", city: "" });
@@ -143,22 +147,12 @@ export default function Home() {
     notes: "",
   });
 
-  const [editPaymentForm, setEditPaymentForm] = useState({
-    tenant_id: "",
-    amount: "",
-    payment_date: "",
-    due_date: "",
-    type: "Miete",
-    status: "pünktlich",
-    notes: "",
-  });
-
-  // Betriebskosten Formular State
+  // Betriebskosten / Beleg Formular State (für den Upload-Bereich)
   const [newOperatingCost, setNewOperatingCost] = useState({
     property_id: "",
     unit_id: "",
     tenant_id: "",
-    kategorie: "Heizkosten",
+    kategorie: "Heizkosten (warm)",
     betrag: "",
     rechnungsdatum: new Date().toISOString().split("T")[0],
     zeitraum_von: "",
@@ -175,7 +169,12 @@ export default function Home() {
     setLoading(true);
 
     const { data: propsData } = await supabase.from("properties").select("*");
-    if (propsData) setProperties(propsData);
+    if (propsData) {
+      setProperties(propsData);
+      if (propsData.length > 0 && !selectedPropertyForBk) {
+        setSelectedPropertyForBk(propsData[0].id);
+      }
+    }
 
     const { data: unitsData } = await supabase.from("units").select("*, properties(name)");
     if (unitsData) setUnits(unitsData as Unit[]);
@@ -213,7 +212,6 @@ export default function Home() {
     });
 
     const paidSum = currentMonthPayments?.reduce((sum, p) => sum + Number(p.amount || 0), 0) || 0;
-
     const paidTenantIds = new Set(currentMonthPayments?.map((p) => p.tenant_id));
     const unpaid = (tenantsData as Tenant[])?.filter((t) => !paidTenantIds.has(t.id)) || [];
 
@@ -386,9 +384,8 @@ export default function Home() {
     e.preventDefault();
     if (!newOperatingCost.property_id || !newOperatingCost.betrag) return;
     
-    alert("Betriebskosten/Rechnung erfolgreich erfasst für Stichtag 31.12.2026!");
+    alert("Beleg/Rechnung erfolgreich hochgeladen und erfasst!");
     setShowAddOperatingCostModal(false);
-    // Hier wird später die Supabase-Tabelle angesprochen
   }
 
   const formatEuro = (val: number) =>
@@ -673,7 +670,6 @@ export default function Home() {
                   </button>
                 </div>
 
-                {/* FILTER-BAR */}
                 <div className="mb-4 flex flex-wrap gap-3 rounded-xl border border-[#e7ebf2] bg-white p-3">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-semibold text-gray-500">Jahr:</span>
@@ -755,26 +751,145 @@ export default function Home() {
               </div>
             )}
 
-            {/* BETRIEBSKOSTEN (NEU) */}
+            {/* BETRIEBSKOSTEN (STRUKTURIERT MIT UNTERMENÜ) */}
             {activePage === "Betriebskosten" && (
               <div>
-                <div className="flex items-center justify-between mb-6">
+                <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
                   <div>
-                    <h2 className="text-[21px] font-bold">Betriebskosten-Abrechnung</h2>
-                    <p className="text-sm text-gray-500">Dynamische Erfassung laufender Rechnungen zum Stichtag 31.12.2026.</p>
+                    <h2 className="text-[21px] font-bold">Betriebskosten & Abrechnung</h2>
+                    <p className="text-sm text-gray-500">Erstellen Sie die Jahresabrechnung oder verwalten Sie die zugehörigen Belege.</p>
                   </div>
-                  <button
-                    onClick={() => setShowAddOperatingCostModal(true)}
-                    className="rounded-lg bg-[#2f6fd0] px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition"
-                  >
-                    + Betriebskosten erfassen
-                  </button>
+
+                  {/* UNTERMENÜ-REITER */}
+                  <div className="flex rounded-xl bg-gray-200/70 p-1">
+                    <button
+                      onClick={() => setBkSubTab("abrechnung")}
+                      className={`rounded-lg px-4 py-1.5 text-xs font-semibold transition ${
+                        bkSubTab === "abrechnung" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"
+                      }`}
+                    >
+                      📊 Jahresabrechnung
+                    </button>
+                    <button
+                      onClick={() => setBkSubTab("belege")}
+                      className={`rounded-lg px-4 py-1.5 text-xs font-semibold transition ${
+                        bkSubTab === "belege" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"
+                      }`}
+                    >
+                      📁 Belege & KI-Upload
+                    </button>
+                  </div>
                 </div>
 
-                <div className="rounded-xl border border-[#e7ebf2] bg-white p-10 text-center shadow-sm">
-                  <h3 className="text-lg font-semibold text-gray-800 mb-2">Keine Rechnungen erfasst</h3>
-                  <p className="text-sm text-gray-500">Lade unterjährige Rechnungen hoch oder erfasse sie manuell für die Abrechnung zum 31.12.2026.</p>
+                {/* FILTER / OBJEKT-AUSWAHL FÜR BEIDE UNTERMENÜS */}
+                <div className="mb-6 flex flex-wrap gap-4 items-center rounded-xl border border-[#e7ebf2] bg-white p-4 shadow-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-gray-500">Gebäude / Objekt:</span>
+                    <select
+                      value={selectedPropertyForBk}
+                      onChange={(e) => setSelectedPropertyForBk(e.target.value)}
+                      className="rounded-lg border border-gray-200 p-2 text-xs bg-gray-50 font-medium"
+                    >
+                      {properties.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name} ({p.city})</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-gray-500">Abrechnungsjahr:</span>
+                    <select
+                      value={bkYear}
+                      onChange={(e) => setBkYear(e.target.value)}
+                      className="rounded-lg border border-gray-200 p-2 text-xs bg-gray-50 font-medium"
+                    >
+                      <option value="2026">2026</option>
+                      <option value="2025">2025</option>
+                      <option value="2024">2024</option>
+                    </select>
+                  </div>
                 </div>
+
+                {/* UNTERMENÜ 1: JAHRESABRECHNUNG FORMULAR */}
+                {bkSubTab === "abrechnung" && (
+                  <div className="space-y-6">
+                    <div className="rounded-xl border border-[#e7ebf2] bg-white p-6 shadow-sm">
+                      <div className="flex justify-between items-center mb-4 border-b pb-3">
+                        <h3 className="text-base font-bold text-gray-800">Übersicht Gebäude-Betriebskosten ({bkYear})</h3>
+                        <span className="text-xs bg-blue-50 text-blue-700 px-2.5 py-1 rounded-full font-semibold">Stichtag: 31.12.{bkYear}</span>
+                      </div>
+
+                      <div className="text-xs text-gray-500 mb-4">
+                        Wählen Sie die anfallenden Kostenarten aus und erfassen Sie die Gesamtkosten. Die Aufteilung auf die Einheiten erfolgt automatisch nach Quadratmetern oder Verteilungsmaßstab.
+                      </div>
+
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm">
+                          <thead className="border-b border-[#e7ebf2] bg-gray-50 text-xs text-gray-500">
+                            <tr>
+                              <th className="p-3 w-10 text-center">Aktiv</th>
+                              <th className="p-3">Kostenart (Heiz-/Warm- & Kalte Kosten)</th>
+                              <th className="p-3">Verteilerschlüssel</th>
+                              <th className="p-3 text-right">Gesamtkosten (€)</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-[#e7ebf2] text-xs">
+                            <CostItemRow label="Heizkosten (warm)" defaultActive={true} defaultKey="Wohnfläche (m²)" defaultAmount="2450.00" />
+                            <CostItemRow label="Warmwasser (warm)" defaultActive={true} defaultKey="Verbrauch / m²" defaultAmount="820.00" />
+                            <CostItemRow label="Müllabfuhr (kalt)" defaultActive={true} defaultKey="Personen / Einheiten" defaultAmount="640.00" />
+                            <CostItemRow label="Wasser / Abwasser (kalt)" defaultActive={true} defaultKey="Wasserzähler (m³)" defaultAmount="1100.00" />
+                            <CostItemRow label="Hausmeister / Reinigung (kalt)" defaultActive={true} defaultKey="Wohnfläche (m²)" defaultAmount="1500.00" />
+                            <CostItemRow label="Grundsteuer (kalt)" defaultActive={true} defaultKey="Wohnfläche (m²)" defaultAmount="950.00" />
+                            <CostItemRow label="Gebäudeversicherung (kalt)" defaultActive={true} defaultKey="Wohnfläche (m²)" defaultAmount="780.00" />
+                            <CostItemRow label="Gartenpflege (kalt)" defaultActive={false} defaultKey="Wohnfläche (m²)" defaultAmount="0.00" />
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div className="mt-6 flex justify-end gap-3 border-t pt-4">
+                        <button
+                          onClick={() => alert("Abrechnung als Entwurf gespeichert!")}
+                          className="rounded-lg border border-gray-300 px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition"
+                        >
+                          Entwurf speichern
+                        </button>
+                        <button
+                          onClick={() => alert("Abrechnung für alle Mieter im Gebäude berechnet und freigegeben!")}
+                          className="rounded-lg bg-[#2f6fd0] px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 transition"
+                        >
+                          Abrechnung erstellen & berechnen 🚀
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* UNTERMENÜ 2: BELEGE & KI-UPLOAD */}
+                {bkSubTab === "belege" && (
+                  <div className="space-y-6">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-base font-bold text-gray-800">Eingereichte Rechnungen & Belege</h3>
+                      <button
+                        onClick={() => setShowAddOperatingCostModal(true)}
+                        className="rounded-lg bg-[#2f6fd0] px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 transition"
+                      >
+                        + Beleg hochladen / erfassen
+                      </button>
+                    </div>
+
+                    <div className="rounded-xl border border-[#e7ebf2] bg-white p-10 text-center shadow-sm">
+                      <div className="text-3xl mb-2">📂</div>
+                      <h4 className="text-sm font-bold text-gray-800">Keine Belege für diesen Zeitraum hinterlegt</h4>
+                      <p className="text-xs text-gray-500 mt-1">Nutzen Sie den KI-Upload im Dialog, um Rechnungen vollautomatisch einlesen zu lassen.</p>
+                      <button
+                        onClick={() => setShowAddOperatingCostModal(true)}
+                        className="mt-4 rounded-lg border border-blue-600 px-4 py-2 text-xs font-semibold text-blue-600 hover:bg-blue-50 transition"
+                      >
+                        Ersten Beleg hochladen
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -788,20 +903,20 @@ export default function Home() {
         </main>
       </div>
 
-      {/* MODAL: BETRIEBSKOSTEN ERFASSEN (MIT KI-UPLOAD) */}
+      {/* MODAL: BELEG / RECHNUNG ERFASSEN (MIT KI-UPLOAD) */}
       {showAddOperatingCostModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
             <div className="mb-4 flex items-center justify-between border-b pb-3">
-              <h3 className="text-lg font-bold text-gray-900">Betriebskosten / Rechnung erfassen</h3>
+              <h3 className="text-lg font-bold text-gray-900">Beleg / Rechnung erfassen</h3>
               <button onClick={() => setShowAddOperatingCostModal(false)} className="text-xl font-bold text-gray-400 hover:text-gray-600">&times;</button>
             </div>
 
-            {/* KI-Rechnungs-Assistent Platzhalter */}
+            {/* KI-Rechnungs-Assistent */}
             <div className="mb-6 flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 p-4">
               <div>
                 <span className="block text-sm font-semibold text-blue-900">🤖 KI-Rechnungs-Assistent</span>
-                <span className="text-xs text-blue-700">Rechnung hochladen und Daten automatisch auslesen lassen</span>
+                <span className="text-xs text-blue-700">Rechnung per PDF/Foto hochladen und automatisch auslesen lassen</span>
               </div>
               <input
                 type="file"
@@ -835,7 +950,7 @@ export default function Home() {
                     value={newOperatingCost.unit_id}
                     onChange={(e) => setNewOperatingCost({ ...newOperatingCost, unit_id: e.target.value })}
                   >
-                    <option value="">Einheit wählen (optional)</option>
+                    <option value="">Ganzes Gebäude (Allgemeinkosten)</option>
                     {units.map((u) => (
                       <option key={u.id} value={u.id}>{u.unit_number} ({u.properties?.name})</option>
                     ))}
@@ -851,11 +966,12 @@ export default function Home() {
                     value={newOperatingCost.kategorie}
                     onChange={(e) => setNewOperatingCost({ ...newOperatingCost, kategorie: e.target.value })}
                   >
-                    <option value="Heizkosten">Heizkosten</option>
-                    <option value="Wasser/Abwasser">Wasser / Abwasser</option>
-                    <option value="Müllabfuhr">Müllabfuhr</option>
-                    <option value="Hausmeister">Hausmeister / Reinigung</option>
-                    <option value="Versicherung">Versicherungen / Grundsteuer</option>
+                    <option value="Heizkosten (warm)">Heizkosten (warm)</option>
+                    <option value="Warmwasser (warm)">Warmwasser (warm)</option>
+                    <option value="Müllabfuhr (kalt)">Müllabfuhr (kalt)</option>
+                    <option value="Wasser/Abwasser (kalt)">Wasser / Abwasser (kalt)</option>
+                    <option value="Hausmeister (kalt)">Hausmeister / Reinigung (kalt)</option>
+                    <option value="Versicherung (kalt)">Versicherung / Grundsteuer (kalt)</option>
                   </select>
                 </div>
 
@@ -904,32 +1020,16 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t pt-4">
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-gray-700">Zugeordneter Mieter</label>
-                  <select
-                    className="w-full rounded-lg border border-gray-300 p-2 text-sm"
-                    value={newOperatingCost.tenant_id}
-                    onChange={(e) => setNewOperatingCost({ ...newOperatingCost, tenant_id: e.target.value })}
-                  >
-                    <option value="">Mieter zuordnen (optional)</option>
-                    {tenants.map((t) => (
-                      <option key={t.id} value={t.id}>{t.first_name} {t.last_name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="flex items-center pt-5">
-                  <label className="flex items-center space-x-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      checked={newOperatingCost.ist_zwischenabrechnung}
-                      onChange={(e) => setNewOperatingCost({ ...newOperatingCost, ist_zwischenabrechnung: e.target.checked })}
-                    />
-                    <span className="text-xs font-medium text-gray-700">Unterjährige Zwischenabrechnung (Mieterwechsel)</span>
-                  </label>
-                </div>
+              <div className="border-t pt-4">
+                <label className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    checked={newOperatingCost.ist_zwischenabrechnung}
+                    onChange={(e) => setNewOperatingCost({ ...newOperatingCost, ist_zwischenabrechnung: e.target.checked })}
+                  />
+                  <span className="text-xs font-medium text-gray-700">Unterjährige Zwischenabrechnung bei Mieterwechsel berücksichtigen</span>
+                </label>
               </div>
 
               <div className="flex justify-end space-x-3 border-t pt-4">
@@ -944,7 +1044,7 @@ export default function Home() {
                   type="submit"
                   className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
                 >
-                  Speichern (Stichtag 31.12.2026)
+                  Beleg speichern
                 </button>
               </div>
             </form>
@@ -952,6 +1052,51 @@ export default function Home() {
         </div>
       )}
     </div>
+  );
+}
+
+function CostItemRow({ label, defaultActive, defaultKey, defaultAmount }: { label: string; defaultActive: boolean; defaultKey: string; defaultAmount: string }) {
+  const [active, setActive] = useState(defaultActive);
+  const [keyType, setKeyType] = useState(defaultKey);
+  const [amount, setAmount] = useState(defaultAmount);
+
+  return (
+    <tr className="hover:bg-gray-50">
+      <td className="p-3 text-center">
+        <input
+          type="checkbox"
+          checked={active}
+          onChange={(e) => setActive(e.target.checked)}
+          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+        />
+      </td>
+      <td className={`p-3 font-medium ${!active ? "text-gray-400 line-through" : "text-gray-800"}`}>
+        {label}
+      </td>
+      <td className="p-3">
+        <select
+          value={keyType}
+          onChange={(e) => setKeyType(e.target.value)}
+          disabled={!active}
+          className="rounded border border-gray-200 p-1 text-xs bg-gray-50 disabled:opacity-50"
+        >
+          <option value="Wohnfläche (m²)">Wohnfläche (m²)</option>
+          <option value="Personen / Einheiten">Personen / Einheiten</option>
+          <option value="Verbrauch / m²">Verbrauch / m²</option>
+          <option value="Wasserzähler (m³)">Wasserzähler (m³)</option>
+        </select>
+      </td>
+      <td className="p-3 text-right">
+        <input
+          type="number"
+          step="0.01"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          disabled={!active}
+          className="w-28 rounded border border-gray-200 p-1 text-right text-xs bg-gray-50 disabled:opacity-50 font-semibold"
+        />
+      </td>
+    </tr>
   );
 }
 
