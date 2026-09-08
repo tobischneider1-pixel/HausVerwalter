@@ -18,6 +18,7 @@ import AddPropertyModal from "@/components/modals/AddPropertyModal";
 import AddUnitModal from "@/components/modals/AddUnitModal";
 import AddTenantModal from "@/components/modals/AddTenantModal";
 import AddPaymentModal from "@/components/modals/AddPaymentModal";
+import AddContractModal from "@/components/modals/AddContractModal";
 
 import ContractsTab from "@/components/tabs/ContractsTab";
 import DocumentsTab from "@/components/tabs/DocumentsTab";
@@ -34,6 +35,7 @@ export default function Page() {
   const [isUnitModalOpen, setIsUnitModalOpen] = useState(false);
   const [isTenantModalOpen, setIsTenantModalOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [isContractModalOpen, setIsContractModalOpen] = useState(false);
 
   const fetchData = async () => {
     try {
@@ -119,6 +121,14 @@ export default function Page() {
         isOpen={isPaymentModalOpen}
         onClose={() => setIsPaymentModalOpen(false)}
         onSuccess={fetchData}
+        tenants={tenants}
+      />
+      <AddContractModal
+        isOpen={isContractModalOpen}
+        onClose={() => setIsContractModalOpen(false)}
+        onSuccess={fetchData}
+        properties={properties}
+        units={units}
         tenants={tenants}
       />
     </div>
