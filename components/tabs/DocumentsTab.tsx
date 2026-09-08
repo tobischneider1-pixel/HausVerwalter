@@ -24,8 +24,10 @@ export function DocumentsTab({ properties: initialProperties, units: initialUnit
   const [uploadModalTenant, setUploadModalTenant] = useState<any | null>(null);
   const [docTitle, setDocTitle] = useState("");
   const [docCategory, setDocCategory] = useState("Kündigungsschreiben");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
 
-  // Ordnerzustände
+  // Ordnerzustände (Accordion)
   const [openPropertyId, setOpenPropertyId] = useState<string | null>(null);
   const [openUnitId, setOpenUnitId] = useState<string | null>(null);
 
@@ -63,33 +65,68 @@ export function DocumentsTab({ properties: initialProperties, units: initialUnit
     }
   };
 
-  // Dokument hinzufügen / hochladen
+  // Echter Datei-Upload zu Supabase Storage + Datenbankeintrag
   const handleUploadDocument = async () => {
     if (!uploadModalTenant || !docTitle) {
       alert("Bitte gib einen Titel für das Dokument ein.");
       return;
     }
 
-    const { error } = await supabase.from("tenant_documents").insert([
-      {
-        tenant_id: uploadModalTenant.id,
-        title: docTitle,
-        category: docCategory,
-      }
-    ]);
+    setUploading(true);
+    try {
+      let fileUrl = null;
 
-    if (error) {
-      alert("Fehler beim Speichern: " + error.message);
-    } else {
+      // 1. Wenn eine Datei ausgewählt wurde, diese in den Supabase Storage Bucket hochladen
+      if (selectedFile) {
+        const fileExt = selectedFile.name.split(".").pop();
+        const uniqueFileName = `${Math.random().toString(36).substring(2)}_${Date.now()}.${fileExt}`;
+        const filePath = `${uploadModalTenant.id}/${uniqueFileName}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from("tenant-documents")
+          .upload(filePath, selectedFile);
+
+        if (uploadError) {
+          throw new Error("Fehler beim Hochladen der Datei: " + uploadError.message);
+        }
+
+        // Öffentliche URL der Datei abrufen
+        const { data: urlData } = supabase.storage
+          .from("tenant-documents")
+          .getPublicUrl(filePath);
+
+        fileUrl = urlData.publicUrl;
+      }
+
+      // 2. Metadaten in die Tabelle "tenant_documents" speichern
+      const { error: dbError } = await supabase.from("tenant_documents").insert([
+        {
+          tenant_id: uploadModalTenant.id,
+          title: docTitle,
+          category: docCategory,
+          file_url: fileUrl,
+        }
+      ]);
+
+      if (dbError) {
+        throw new Error("Fehler beim Speichern in der Datenbank: " + dbError.message);
+      }
+
+      // Reset & Neu laden
       setDocTitle("");
+      setSelectedFile(null);
       setUploadModalTenant(null);
       loadAllData();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setUploading(false);
     }
   };
 
   return (
     <div className="p-6 space-y-6 text-xs text-slate-700 min-h-[500px]">
-      {/* Vorschau PopUp */}
+      {/* Vorschau PopUp für archivierte Verträge */}
       {selectedContract && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col">
@@ -100,13 +137,13 @@ export function DocumentsTab({ properties: initialProperties, units: initialUnit
               <div className="flex gap-2">
                 <button
                   onClick={() => window.print()}
-                  className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-1.5 rounded-lg"
+                  className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-1.5 rounded-lg transition-colors cursor-pointer"
                 >
                   🖨️ Drucken / PDF
                 </button>
                 <button
                   onClick={() => setSelectedContract(null)}
-                  className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold px-3 py-1.5 rounded-lg"
+                  className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
                 >
                   Schließen
                 </button>
@@ -155,20 +192,38 @@ export function DocumentsTab({ properties: initialProperties, units: initialUnit
                   <option value="Sonstiges">Sonstiges Dokument</option>
                 </select>
               </div>
+
+              <div>
+                <label className="block font-medium text-slate-700 mb-1">Datei auswählen (PDF, Scan, Bild)</label>
+                <input
+                  type="file"
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files[0]) {
+                      setSelectedFile(e.target.files[0]);
+                    }
+                  }}
+                  className="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"
+                />
+              </div>
             </div>
 
             <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
               <button
-                onClick={() => setUploadModalTenant(null)}
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg"
+                onClick={() => {
+                  setUploadModalTenant(null);
+                  setSelectedFile(null);
+                }}
+                disabled={uploading}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition-colors cursor-pointer"
               >
                 Abbrechen
               </button>
               <button
                 onClick={handleUploadDocument}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg"
+                disabled={uploading}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
               >
-                Speichern
+                {uploading ? "Lade hoch..." : "Speichern & Hochladen"}
               </button>
             </div>
           </div>
@@ -204,7 +259,7 @@ export function DocumentsTab({ properties: initialProperties, units: initialUnit
                   {/* Ebene 1: Objekt */}
                   <button
                     onClick={() => setOpenPropertyId(isPropOpen ? null : String(prop.id))}
-                    className="w-full flex justify-between items-center p-3.5 bg-slate-100 hover:bg-slate-200/80 transition-colors font-bold text-slate-800 text-xs text-left"
+                    className="w-full flex justify-between items-center p-3.5 bg-slate-100 hover:bg-slate-200/80 transition-colors font-bold text-slate-800 text-xs text-left cursor-pointer"
                   >
                     <span className="flex items-center gap-2">
                       🏢 {prop.name || prop.address || "Unbenanntes Objekt"}
@@ -228,7 +283,7 @@ export function DocumentsTab({ properties: initialProperties, units: initialUnit
                             <div key={unit.id} className="border border-slate-200 rounded-lg ml-3 overflow-hidden">
                               <button
                                 onClick={() => setOpenUnitId(isUnitOpen ? null : String(unit.id))}
-                                className="w-full flex justify-between items-center p-2.5 bg-slate-50 hover:bg-slate-100 font-semibold text-slate-700 text-xs text-left"
+                                className="w-full flex justify-between items-center p-2.5 bg-slate-50 hover:bg-slate-100 font-semibold text-slate-700 text-xs text-left transition-colors cursor-pointer"
                               >
                                 <span className="flex items-center gap-2">
                                   🚪 Einheit {unit.unit_number || unit.id} {unit.type ? `(${unit.type})` : ""}
@@ -260,7 +315,7 @@ export function DocumentsTab({ properties: initialProperties, units: initialUnit
                                             </div>
                                             <button
                                               onClick={() => setUploadModalTenant(tenant)}
-                                              className="bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1 rounded font-medium text-[10px] flex items-center gap-1"
+                                              className="bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1 rounded font-medium text-[10px] flex items-center gap-1 transition-colors cursor-pointer"
                                             >
                                               ➕ Dokument hinzufügen
                                             </button>
@@ -289,7 +344,7 @@ export function DocumentsTab({ properties: initialProperties, units: initialUnit
                                                     </div>
                                                     <button
                                                       onClick={() => setSelectedContract(doc)}
-                                                      className="bg-blue-50 text-blue-700 hover:bg-blue-100 font-semibold px-2.5 py-1 rounded text-[10px]"
+                                                      className="bg-blue-50 text-blue-700 hover:bg-blue-100 font-semibold px-2.5 py-1 rounded text-[10px] transition-colors cursor-pointer"
                                                     >
                                                       Ansehen
                                                     </button>
@@ -302,9 +357,23 @@ export function DocumentsTab({ properties: initialProperties, units: initialUnit
                                                     <span className="font-medium text-slate-800 flex items-center gap-1.5">
                                                       📎 {file.title} <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">{file.category}</span>
                                                     </span>
-                                                    <span className="text-[10px] text-slate-400">
-                                                      {file.created_at?.split("T")[0]}
-                                                    </span>
+                                                    <div className="flex items-center gap-2">
+                                                      <span className="text-[10px] text-slate-400">
+                                                        {file.created_at?.split("T")[0]}
+                                                      </span>
+                                                      {file.file_url ? (
+                                                        <a
+                                                          href={file.file_url}
+                                                          target="_blank"
+                                                          rel="noopener noreferrer"
+                                                          className="bg-blue-50 text-blue-700 hover:bg-blue-100 font-semibold px-2.5 py-1 rounded text-[10px] transition-colors"
+                                                        >
+                                                          Öffnen
+                                                        </a>
+                                                      ) : (
+                                                        <span className="text-[10px] text-slate-400 italic">Keine Datei</span>
+                                                      )}
+                                                    </div>
                                                   </div>
                                                 ))}
                                               </>
