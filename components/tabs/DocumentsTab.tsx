@@ -16,10 +16,16 @@ export function DocumentsTab({ properties: initialProperties, units: initialUnit
   const [units, setUnits] = useState<Unit[]>(initialUnits || []);
   const [tenants, setTenants] = useState<Tenant[]>(initialTenants || []);
   const [archivedContracts, setArchivedContracts] = useState<any[]>([]);
+  const [uploadedDocs, setUploadedDocs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedContract, setSelectedContract] = useState<any | null>(null);
 
-  // Zustand für eingeklappte Ordner
+  // Upload Modal State
+  const [uploadModalTenant, setUploadModalTenant] = useState<any | null>(null);
+  const [docTitle, setDocTitle] = useState("");
+  const [docCategory, setDocCategory] = useState("Kündigungsschreiben");
+
+  // Ordnerzustände
   const [openPropertyId, setOpenPropertyId] = useState<string | null>(null);
   const [openUnitId, setOpenUnitId] = useState<string | null>(null);
 
@@ -30,33 +36,66 @@ export function DocumentsTab({ properties: initialProperties, units: initialUnit
   const loadAllData = async () => {
     setLoading(true);
     try {
-      const [propsRes, unitsRes, tenantsRes, contractsRes] = await Promise.all([
+      const [propsRes, unitsRes, tenantsRes, contractsRes, docsRes] = await Promise.all([
         supabase.from("properties").select("*"),
         supabase.from("units").select("*"),
         supabase.from("tenants").select("*"),
-        supabase.from("contracts").select("*").eq("is_archived", true).order("created_at", { ascending: false })
+        supabase.from("contracts").select("*"),
+        supabase.from("tenant_documents").select("*")
       ]);
 
       if (propsRes.data) setProperties(propsRes.data);
       if (unitsRes.data) setUnits(unitsRes.data);
       if (tenantsRes.data) setTenants(tenantsRes.data);
-      if (contractsRes.data) setArchivedContracts(contractsRes.data);
-    } catch (err) {
-      console.error("Fehler beim Laden der Dokumente:", err);
+
+      if (contractsRes.data) {
+        const archived = contractsRes.data.filter((c: any) => c.is_archived === true);
+        setArchivedContracts(archived);
+      }
+
+      if (docsRes.data) {
+        setUploadedDocs(docsRes.data);
+      }
+    } catch (err: any) {
+      console.error("Fehler beim Laden der Daten:", err);
     } finally {
       setLoading(false);
     }
   };
 
+  // Dokument hinzufügen / hochladen
+  const handleUploadDocument = async () => {
+    if (!uploadModalTenant || !docTitle) {
+      alert("Bitte gib einen Titel für das Dokument ein.");
+      return;
+    }
+
+    const { error } = await supabase.from("tenant_documents").insert([
+      {
+        tenant_id: uploadModalTenant.id,
+        title: docTitle,
+        category: docCategory,
+      }
+    ]);
+
+    if (error) {
+      alert("Fehler beim Speichern: " + error.message);
+    } else {
+      setDocTitle("");
+      setUploadModalTenant(null);
+      loadAllData();
+    }
+  };
+
   return (
-    <div className="p-6 space-y-6 text-xs text-slate-700">
+    <div className="p-6 space-y-6 text-xs text-slate-700 min-h-[500px]">
       {/* Vorschau PopUp */}
       {selectedContract && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col">
             <div className="p-4 border-b flex justify-between items-center bg-slate-50">
               <h3 className="font-bold text-slate-800 text-sm">
-                📄 Archivierter Vertrag: {selectedContract.tenant_name || "Unbekannter Mieter"}
+                📄 Archivierter Vertrag: {selectedContract.tenant_name || "Unbekannt"}
               </h3>
               <div className="flex gap-2">
                 <button
@@ -80,24 +119,79 @@ export function DocumentsTab({ properties: initialProperties, units: initialUnit
         </div>
       )}
 
+      {/* Modal: Dokument hochladen */}
+      {uploadModalTenant && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4 border border-slate-200">
+            <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+              📎 Dokument hochladen / hinzufügen
+            </h3>
+            <p className="text-slate-500 text-xs">
+              Mieter: <strong>{uploadModalTenant.first_name} {uploadModalTenant.last_name}</strong>
+            </p>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block font-medium text-slate-700 mb-1">Dokumenten-Titel</label>
+                <input
+                  type="text"
+                  placeholder="z.B. Kündigungsschreiben Mieter"
+                  value={docTitle}
+                  onChange={(e) => setDocTitle(e.target.value)}
+                  className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block font-medium text-slate-700 mb-1">Kategorie</label>
+                <select
+                  value={docCategory}
+                  onChange={(e) => setDocCategory(e.target.value)}
+                  className="w-full p-2.5 border border-slate-300 rounded-lg outline-none text-xs bg-white"
+                >
+                  <option value="Kündigungsschreiben">Kündigungsschreiben</option>
+                  <option value="Übergabeprotokoll">Übergabeprotokoll</option>
+                  <option value="Mahnung">Mahnung / Schriftverkehr</option>
+                  <option value="Sonstiges">Sonstiges Dokument</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+              <button
+                onClick={() => setUploadModalTenant(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg"
+              >
+                Abbrechen
+              </button>
+              <button
+                onClick={handleUploadDocument}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg"
+              >
+                Speichern
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div>
         <h2 className="text-lg font-bold text-slate-900">Dokumente & Archiv</h2>
         <p className="text-slate-500">
-          Historische Verträge & Unterlagen geordnet nach Objekt, Einheit und Mieterzeitraum.
+          Historische Verträge, Kündigungen & Unterlagen geordnet nach Objekt und Mieter.
         </p>
       </div>
 
       {/* Ordnerstruktur */}
-      <div className="bg-white p-6 rounded-xl border border-slate-200 space-y-4 shadow-xs">
+      <div className="bg-white p-6 rounded-xl border border-slate-200 space-y-4 shadow-sm">
         {loading ? (
           <div className="p-8 text-center text-slate-400">
-            <p>Lade Dokumentenstruktur und Archiv...</p>
+            <p className="animate-pulse">⏳ Lade Dokumentenstruktur...</p>
           </div>
         ) : properties.length === 0 ? (
           <div className="p-8 text-center border-2 border-dashed border-slate-200 rounded-xl">
-            <p className="text-slate-500 font-medium">Noch keine Objekte vorhanden.</p>
-            <p className="text-slate-400 text-[11px] mt-1">Lege zuerst Objekte und Einheiten an, um die Ordnerstruktur zu nutzen.</p>
+            <p className="text-slate-500 font-medium text-sm">📁 Keine Objekte vorhanden</p>
           </div>
         ) : (
           <div className="space-y-3">
@@ -124,7 +218,7 @@ export function DocumentsTab({ properties: initialProperties, units: initialUnit
                   {isPropOpen && (
                     <div className="p-3 space-y-2 bg-white border-t border-slate-200">
                       {propUnits.length === 0 ? (
-                        <p className="text-slate-400 italic pl-4 py-1">Keine Einheiten in diesem Objekt angelegt.</p>
+                        <p className="text-slate-400 italic pl-4 py-1">Keine Einheiten angelegt.</p>
                       ) : (
                         propUnits.map((unit) => {
                           const isUnitOpen = openUnitId === String(unit.id);
@@ -142,7 +236,7 @@ export function DocumentsTab({ properties: initialProperties, units: initialUnit
                                 <span className="text-slate-400 font-normal">{isUnitOpen ? "▲" : "▼"}</span>
                               </button>
 
-                              {/* Ebene 3: Mieter (Historisch & Zeiträume) */}
+                              {/* Ebene 3: Mieter */}
                               {isUnitOpen && (
                                 <div className="p-3 bg-white space-y-3 border-t border-slate-100 ml-2">
                                   {unitTenants.length === 0 ? (
@@ -153,34 +247,67 @@ export function DocumentsTab({ properties: initialProperties, units: initialUnit
                                       const docs = archivedContracts.filter(
                                         (c) => String(c.tenant_id) === String(tenant.id) || c.tenant_name === tenantName
                                       );
+                                      const files = uploadedDocs.filter((d) => String(d.tenant_id) === String(tenant.id));
 
                                       return (
                                         <div key={tenant.id} className="p-3 rounded-lg bg-amber-50/40 border border-amber-200/60 space-y-2">
-                                          <div className="flex justify-between items-center">
-                                            <span className="font-bold text-slate-900">👤 {tenantName}</span>
-                                            <span className="text-[10px] bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-mono">
-                                              Mietzeitraum: {tenant.move_in_date || "Beginn n.a."} – {tenant.move_out_date || "laufend"}
-                                            </span>
+                                          <div className="flex justify-between items-center flex-wrap gap-2">
+                                            <div>
+                                              <span className="font-bold text-slate-900">👤 {tenantName}</span>
+                                              <span className="ml-2 text-[10px] bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-mono">
+                                                Einzug: {tenant.move_in_date || "n.a."} | Auszug/Ende: {tenant.move_out_date || "laufend"}
+                                              </span>
+                                            </div>
+                                            <button
+                                              onClick={() => setUploadModalTenant(tenant)}
+                                              className="bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1 rounded font-medium text-[10px] flex items-center gap-1"
+                                            >
+                                              ➕ Dokument hinzufügen
+                                            </button>
                                           </div>
 
-                                          {/* Dokumente des Mieters */}
-                                          <div className="pt-1 space-y-1">
-                                            {docs.length === 0 ? (
-                                              <p className="text-slate-400 text-[11px] italic">Keine archivierten Verträge für diesen Mieter.</p>
+                                          {/* Dokumente & Kündigungsinfos */}
+                                          <div className="pt-1 space-y-1.5">
+                                            {docs.length === 0 && files.length === 0 ? (
+                                              <p className="text-slate-400 text-[11px] italic">Keine Dokumente abgelegt.</p>
                                             ) : (
-                                              docs.map((doc) => (
-                                                <div key={doc.id} className="flex justify-between items-center bg-white p-2 rounded border border-slate-200">
-                                                  <span className="font-medium text-slate-800 flex items-center gap-1.5">
-                                                    📄 Mietvertrag (Archiviert am {doc.created_at ? new Date(doc.created_at).toLocaleDateString("de-DE") : "unbekannt"})
-                                                  </span>
-                                                  <button
-                                                    onClick={() => setSelectedContract(doc)}
-                                                    className="bg-blue-50 text-blue-700 hover:bg-blue-100 font-semibold px-2.5 py-1 rounded text-[10px] transition-colors"
-                                                  >
-                                                    Ansehen
-                                                  </button>
-                                                </div>
-                                              ))
+                                              <>
+                                                {/* Archivierte Mietverträge */}
+                                                {docs.map((doc) => (
+                                                  <div key={doc.id} className="flex justify-between items-center bg-white p-2.5 rounded border border-slate-200">
+                                                    <div>
+                                                      <span className="font-medium text-slate-800 flex items-center gap-1.5">
+                                                        📄 Mietvertrag (Archiv)
+                                                      </span>
+                                                      <div className="text-[10px] text-slate-500 mt-0.5 flex gap-3">
+                                                        <span>Beginn: <strong>{doc.start_date || "k.A."}</strong></span>
+                                                        <span>Vertragsende: <strong className="text-red-600">{doc.end_date || "k.A."}</strong></span>
+                                                        {doc.cancellation_received_at && (
+                                                          <span>Kündigungseingang: <strong>{doc.cancellation_received_at}</strong></span>
+                                                        )}
+                                                      </div>
+                                                    </div>
+                                                    <button
+                                                      onClick={() => setSelectedContract(doc)}
+                                                      className="bg-blue-50 text-blue-700 hover:bg-blue-100 font-semibold px-2.5 py-1 rounded text-[10px]"
+                                                    >
+                                                      Ansehen
+                                                    </button>
+                                                  </div>
+                                                ))}
+
+                                                {/* Manuell hochgeladene Dokumente */}
+                                                {files.map((file) => (
+                                                  <div key={file.id} className="flex justify-between items-center bg-white p-2 rounded border border-slate-200">
+                                                    <span className="font-medium text-slate-800 flex items-center gap-1.5">
+                                                      📎 {file.title} <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">{file.category}</span>
+                                                    </span>
+                                                    <span className="text-[10px] text-slate-400">
+                                                      {file.created_at?.split("T")[0]}
+                                                    </span>
+                                                  </div>
+                                                ))}
+                                              </>
                                             )}
                                           </div>
                                         </div>
