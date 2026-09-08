@@ -42,54 +42,98 @@ export default function AddContractModal({
     (t) => !selectedUnitId || String(t.unit_id) === String(selectedUnitId)
   );
 
-  // Auto-Fill bei Einheiten-Auswahl
+  // ZENTRALE AUTO-FILL LOGIK (Durchsucht Mieter & Einheit)
+  const autoFillFinancials = (tenantId: string, unitId: string) => {
+    const tenant = tenants.find((t) => String(t.id) === String(tenantId));
+    const unit = units.find((u) => String(u.id) === String(unitId));
+
+    const tAny = (tenant || {}) as any;
+    const uAny = (unit || {}) as any;
+
+    // 1. Kaltmiete suchen (prüft alle gängigen DB-Feldnamen)
+    const rawCold =
+      tAny.cold_rent ??
+      tAny.rent ??
+      tAny.kaltmiete ??
+      tAny.monthly_rent ??
+      uAny.cold_rent ??
+      uAny.rent ??
+      uAny.kaltmiete ??
+      0;
+
+    // 2. Nebenkosten suchen
+    const rawUtil =
+      tAny.utility_costs ??
+      tAny.nebenkosten ??
+      tAny.utility_cost ??
+      uAny.utility_costs ??
+      uAny.nebenkosten ??
+      0;
+
+    // 3. Kaution suchen
+    const rawDep =
+      tAny.deposit ??
+      tAny.kaution ??
+      uAny.deposit ??
+      uAny.kaution ??
+      0;
+
+    const numCold = parseFloat(rawCold) || 0;
+    const numUtil = parseFloat(rawUtil) || 0;
+    let numDep = parseFloat(rawDep) || 0;
+
+    // Falls keine Kaution hinterlegt ist, automatisch 3x Kaltmiete berechnen
+    if (!numDep && numCold > 0) {
+      numDep = numCold * 3;
+    }
+
+    if (numCold > 0) setColdRent(String(numCold));
+    if (numUtil > 0) setUtilityCosts(String(numUtil));
+    if (numDep > 0) setDeposit(String(numDep));
+  };
+
+  // Bei Einheiten-Auswahl
   const handleUnitChange = (unitId: string) => {
     setSelectedUnitId(unitId);
     const unit = units.find((u) => String(u.id) === String(unitId));
+    
     if (unit) {
       if (unit.property_id) setSelectedPropertyId(String(unit.property_id));
       if ((unit as any).notice_period_months) setNoticePeriodMonths((unit as any).notice_period_months);
+
+      // Zugehörigen Mieter automatisch ermitteln & Werte füllen
+      const matchingTenant = tenants.find((t) => String(t.unit_id) === String(unitId));
+      const tenantIdToUse = matchingTenant ? String(matchingTenant.id) : selectedTenantId;
+      
+      if (matchingTenant) {
+        setSelectedTenantId(tenantIdToUse);
+      }
+
+      autoFillFinancials(tenantIdToUse, unitId);
     }
   };
 
-  // Auto-Fill bei Mieter-Auswahl
+  // Bei Mieter-Auswahl
   const handleTenantChange = (tenantId: string) => {
     setSelectedTenantId(tenantId);
     const tenant = tenants.find((t) => String(t.id) === String(tenantId));
 
-    if (tenant) {
-      // Zugehörige Einheit & Objekt selektieren
-      if (tenant.unit_id) {
-        const uId = String(tenant.unit_id);
-        setSelectedUnitId(uId);
-        const unit = units.find((u) => String(u.id) === uId);
-        if (unit && unit.property_id) {
-          setSelectedPropertyId(String(unit.property_id));
-        }
+    let unitIdToUse = selectedUnitId;
+
+    if (tenant && tenant.unit_id) {
+      unitIdToUse = String(tenant.unit_id);
+      setSelectedUnitId(unitIdToUse);
+
+      const unit = units.find((u) => String(u.id) === unitIdToUse);
+      if (unit && unit.property_id) {
+        setSelectedPropertyId(String(unit.property_id));
       }
-
-      // Alle gängigen Feldbezeichnungen prüfen
-      const tAny = tenant as any;
-      const rawCold = tAny.cold_rent ?? tAny.rent ?? tAny.kaltmiete ?? 0;
-      const rawUtil = tAny.utility_costs ?? tAny.nebenkosten ?? 0;
-      const rawDep = tAny.deposit ?? tAny.kaution ?? 0;
-
-      const numCold = parseFloat(rawCold) || 0;
-      const numUtil = parseFloat(rawUtil) || 0;
-      let numDep = parseFloat(rawDep) || 0;
-
-      // Wenn keine Kaution beim Mieter eingetragen ist, direkt 3x Kaltmiete vorschlagen
-      if (!numDep && numCold > 0) {
-        numDep = numCold * 3;
-      }
-
-      setColdRent(numCold > 0 ? String(numCold) : "");
-      setUtilityCosts(numUtil > 0 ? String(numUtil) : "");
-      setDeposit(numDep > 0 ? String(numDep) : "");
     }
+
+    autoFillFinancials(tenantId, unitIdToUse);
   };
 
-  // Dynamische Kautions-Berechnung beim Tippen der Kaltmiete
+  // Dynamische 3x Kautions-Berechnung beim Tippen
   const handleColdRentChange = (val: string) => {
     setColdRent(val);
     const parsedCold = parseFloat(val);
@@ -118,7 +162,7 @@ export default function AddContractModal({
     const numDep = parseFloat(deposit) || 0;
 
     try {
-      // 1. Vertrag speichern
+      // 1. Vertrag in DB speichern
       const { error: contractErr } = await supabase.from("contracts").insert([
         {
           tenant_id: selectedTenantId || null,
@@ -145,7 +189,7 @@ export default function AddContractModal({
           .eq("id", selectedUnitId);
       }
 
-      // 3. Werte synchron in die Mieter-Tabelle schreiben (alle Schreibweisen abdecken)
+      // 3. Mieter-Stammdaten synchronisieren (beschreibt alle gängigen DB-Spalten)
       if (selectedTenantId) {
         await supabase
           .from("tenants")
