@@ -42,14 +42,41 @@ export default function AddContractModal({
     (t) => !selectedUnitId || String(t.unit_id) === String(selectedUnitId)
   );
 
+  // Auto-Fill bei Auswahl der Einheit
   const handleUnitChange = (unitId: string) => {
     setSelectedUnitId(unitId);
     const unit = units.find((u) => String(u.id) === String(unitId));
     if (unit) {
       if (unit.property_id) setSelectedPropertyId(String(unit.property_id));
-      if ((unit as any).cold_rent) setColdRent(String((unit as any).cold_rent || ""));
-      if ((unit as any).utility_costs) setUtilityCosts(String((unit as any).utility_costs || ""));
+      if ((unit as any).cold_rent && !coldRent) setColdRent(String((unit as any).cold_rent));
+      if ((unit as any).utility_costs && !utilityCosts) setUtilityCosts(String((unit as any).utility_costs));
       if ((unit as any).notice_period_months) setNoticePeriodMonths((unit as any).notice_period_months);
+    }
+  };
+
+  // Auto-Fill bei Auswahl des Mieters
+  const handleTenantChange = (tenantId: string) => {
+    setSelectedTenantId(tenantId);
+    const tenant = tenants.find((t) => String(t.id) === String(tenantId));
+
+    if (tenant) {
+      // Automatisch zugehörige Einheit & Objekt wählen
+      if (tenant.unit_id) {
+        setSelectedUnitId(String(tenant.unit_id));
+        const unit = units.find((u) => String(u.id) === String(tenant.unit_id));
+        if (unit && unit.property_id) {
+          setSelectedPropertyId(String(unit.property_id));
+        }
+      }
+
+      // Finanzwerte direkt aus dem Mieter vorausfüllen
+      const tenantCold = (tenant as any).cold_rent || (tenant as any).rent;
+      const tenantUtil = (tenant as any).utility_costs || (tenant as any).nebenkosten;
+      const tenantDep = (tenant as any).deposit || (tenant as any).kaution;
+
+      if (tenantCold) setColdRent(String(tenantCold));
+      if (tenantUtil) setUtilityCosts(String(tenantUtil));
+      if (tenantDep) setDeposit(String(tenantDep));
     }
   };
 
@@ -68,8 +95,12 @@ export default function AddContractModal({
       ? `${prop.name || ""} ${prop.address || ""}`.trim()
       : "Unbekannte Adresse";
 
+    const numCold = parseFloat(coldRent) || 0;
+    const numUtil = parseFloat(utilityCosts) || 0;
+    const numDep = parseFloat(deposit) || 0;
+
     try {
-      // 1. Vertrag in DB anlegen
+      // 1. Vertrag in DB speichern
       const { error: contractErr } = await supabase.from("contracts").insert([
         {
           tenant_id: selectedTenantId || null,
@@ -78,9 +109,9 @@ export default function AddContractModal({
           property_id: selectedPropertyId || null,
           property_address: propAddress,
           start_date: startDate,
-          cold_rent: parseFloat(coldRent) || 0,
-          utility_costs: parseFloat(utilityCosts) || 0,
-          deposit: parseFloat(deposit) || 0,
+          cold_rent: numCold,
+          utility_costs: numUtil,
+          deposit: numDep,
           notice_period_months: Number(noticePeriodMonths),
           is_archived: false,
         },
@@ -88,12 +119,25 @@ export default function AddContractModal({
 
       if (contractErr) throw contractErr;
 
-      // 2. Kündigungsfrist bei der Einheit hinterlegen
+      // 2. Kündigungsfrist an der Einheit aktualisieren
       if (selectedUnitId) {
         await supabase
           .from("units")
           .update({ notice_period_months: Number(noticePeriodMonths) })
           .eq("id", selectedUnitId);
+      }
+
+      // 3. Werte auch beim Mieter aktualisieren (Synchronisation)
+      if (selectedTenantId) {
+        await supabase
+          .from("tenants")
+          .update({
+            cold_rent: numCold,
+            utility_costs: numUtil,
+            deposit: numDep,
+            move_in_date: startDate,
+          })
+          .eq("id", selectedTenantId);
       }
 
       onSuccess();
@@ -162,7 +206,7 @@ export default function AddContractModal({
             <label className="block font-semibold text-slate-700 mb-1">Mieter</label>
             <select
               value={selectedTenantId}
-              onChange={(e) => setSelectedTenantId(e.target.value)}
+              onChange={(e) => handleTenantChange(e.target.value)}
               className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 bg-white"
               required
             >
