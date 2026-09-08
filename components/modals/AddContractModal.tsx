@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { Property, Unit, Tenant } from "@/types";
 
@@ -32,6 +32,87 @@ export default function AddContractModal({
   const [noticePeriodMonths, setNoticePeriodMonths] = useState(3);
   const [submitting, setSubmitting] = useState(false);
 
+  // Auto-Fill Berechnung für Miete, NK und 3x Kaution
+  const autoFillFinancials = useCallback(
+    (tId: string, uId: string) => {
+      const tenant = tenants.find((t) => String(t.id) === String(tId));
+      const unit = units.find((u) => String(u.id) === String(uId));
+
+      const tAny = (tenant || {}) as any;
+      const uAny = (unit || {}) as any;
+
+      const rawCold =
+        tAny.cold_rent ??
+        tAny.rent ??
+        tAny.kaltmiete ??
+        tAny.monthly_rent ??
+        uAny.cold_rent ??
+        uAny.rent ??
+        uAny.kaltmiete ??
+        0;
+
+      const rawUtil =
+        tAny.utility_costs ??
+        tAny.nebenkosten ??
+        tAny.utility_cost ??
+        uAny.utility_costs ??
+        uAny.nebenkosten ??
+        0;
+
+      const rawDep =
+        tAny.deposit ??
+        tAny.kaution ??
+        uAny.deposit ??
+        uAny.kaution ??
+        0;
+
+      const numCold = parseFloat(rawCold) || 0;
+      const numUtil = parseFloat(rawUtil) || 0;
+      let numDep = parseFloat(rawDep) || 0;
+
+      // Falls keine Kaution beim Mieter steht, automatisch 3x Kaltmiete setzen
+      if (!numDep && numCold > 0) {
+        numDep = numCold * 3;
+      }
+
+      if (numCold > 0) setColdRent(String(numCold));
+      if (numUtil > 0) setUtilityCosts(String(numUtil));
+      if (numDep > 0) setDeposit(String(numDep));
+    },
+    [tenants, units]
+  );
+
+  // Automatischer Aufruf direkt beim Öffnen des Modals
+  useEffect(() => {
+    if (!isOpen) return;
+
+    let curTenantId = selectedTenantId;
+    let curUnitId = selectedUnitId;
+    let curPropId = selectedPropertyId;
+
+    // Falls noch kein Mieter gewählt ist, den ersten verfügbaren Mieter wählen
+    if (!curTenantId && tenants.length > 0) {
+      curTenantId = String(tenants[0].id);
+      setSelectedTenantId(curTenantId);
+    }
+
+    const tenant = tenants.find((t) => String(t.id) === String(curTenantId));
+    if (tenant && tenant.unit_id && !curUnitId) {
+      curUnitId = String(tenant.unit_id);
+      setSelectedUnitId(curUnitId);
+    }
+
+    if (curUnitId && !curPropId) {
+      const unit = units.find((u) => String(u.id) === String(curUnitId));
+      if (unit && unit.property_id) {
+        curPropId = String(unit.property_id);
+        setSelectedPropertyId(curPropId);
+      }
+    }
+
+    autoFillFinancials(curTenantId, curUnitId);
+  }, [isOpen, selectedTenantId, selectedUnitId, selectedPropertyId, tenants, units, autoFillFinancials]);
+
   if (!isOpen) return null;
 
   const filteredUnits = units.filter(
@@ -42,57 +123,6 @@ export default function AddContractModal({
     (t) => !selectedUnitId || String(t.unit_id) === String(selectedUnitId)
   );
 
-  // ZENTRALE AUTO-FILL LOGIK (Durchsucht Mieter & Einheit)
-  const autoFillFinancials = (tenantId: string, unitId: string) => {
-    const tenant = tenants.find((t) => String(t.id) === String(tenantId));
-    const unit = units.find((u) => String(u.id) === String(unitId));
-
-    const tAny = (tenant || {}) as any;
-    const uAny = (unit || {}) as any;
-
-    // 1. Kaltmiete suchen (prüft alle gängigen DB-Feldnamen)
-    const rawCold =
-      tAny.cold_rent ??
-      tAny.rent ??
-      tAny.kaltmiete ??
-      tAny.monthly_rent ??
-      uAny.cold_rent ??
-      uAny.rent ??
-      uAny.kaltmiete ??
-      0;
-
-    // 2. Nebenkosten suchen
-    const rawUtil =
-      tAny.utility_costs ??
-      tAny.nebenkosten ??
-      tAny.utility_cost ??
-      uAny.utility_costs ??
-      uAny.nebenkosten ??
-      0;
-
-    // 3. Kaution suchen
-    const rawDep =
-      tAny.deposit ??
-      tAny.kaution ??
-      uAny.deposit ??
-      uAny.kaution ??
-      0;
-
-    const numCold = parseFloat(rawCold) || 0;
-    const numUtil = parseFloat(rawUtil) || 0;
-    let numDep = parseFloat(rawDep) || 0;
-
-    // Falls keine Kaution hinterlegt ist, automatisch 3x Kaltmiete berechnen
-    if (!numDep && numCold > 0) {
-      numDep = numCold * 3;
-    }
-
-    if (numCold > 0) setColdRent(String(numCold));
-    if (numUtil > 0) setUtilityCosts(String(numUtil));
-    if (numDep > 0) setDeposit(String(numDep));
-  };
-
-  // Bei Einheiten-Auswahl
   const handleUnitChange = (unitId: string) => {
     setSelectedUnitId(unitId);
     const unit = units.find((u) => String(u.id) === String(unitId));
@@ -101,25 +131,19 @@ export default function AddContractModal({
       if (unit.property_id) setSelectedPropertyId(String(unit.property_id));
       if ((unit as any).notice_period_months) setNoticePeriodMonths((unit as any).notice_period_months);
 
-      // Zugehörigen Mieter automatisch ermitteln & Werte füllen
       const matchingTenant = tenants.find((t) => String(t.unit_id) === String(unitId));
       const tenantIdToUse = matchingTenant ? String(matchingTenant.id) : selectedTenantId;
-      
-      if (matchingTenant) {
-        setSelectedTenantId(tenantIdToUse);
-      }
+      if (matchingTenant) setSelectedTenantId(tenantIdToUse);
 
       autoFillFinancials(tenantIdToUse, unitId);
     }
   };
 
-  // Bei Mieter-Auswahl
   const handleTenantChange = (tenantId: string) => {
     setSelectedTenantId(tenantId);
     const tenant = tenants.find((t) => String(t.id) === String(tenantId));
 
     let unitIdToUse = selectedUnitId;
-
     if (tenant && tenant.unit_id) {
       unitIdToUse = String(tenant.unit_id);
       setSelectedUnitId(unitIdToUse);
@@ -133,7 +157,6 @@ export default function AddContractModal({
     autoFillFinancials(tenantId, unitIdToUse);
   };
 
-  // Dynamische 3x Kautions-Berechnung beim Tippen
   const handleColdRentChange = (val: string) => {
     setColdRent(val);
     const parsedCold = parseFloat(val);
@@ -162,7 +185,7 @@ export default function AddContractModal({
     const numDep = parseFloat(deposit) || 0;
 
     try {
-      // 1. Vertrag in DB speichern
+      // 1. Vertrag in DB anlegen
       const { error: contractErr } = await supabase.from("contracts").insert([
         {
           tenant_id: selectedTenantId || null,
@@ -181,7 +204,7 @@ export default function AddContractModal({
 
       if (contractErr) throw contractErr;
 
-      // 2. Kündigungsfrist an der Einheit speichern
+      // 2. Kündigungsfrist bei Einheit aktualisieren
       if (selectedUnitId) {
         await supabase
           .from("units")
@@ -189,7 +212,7 @@ export default function AddContractModal({
           .eq("id", selectedUnitId);
       }
 
-      // 3. Mieter-Stammdaten synchronisieren (beschreibt alle gängigen DB-Spalten)
+      // 3. Mieter-Stammdaten synchronisieren
       if (selectedTenantId) {
         await supabase
           .from("tenants")
