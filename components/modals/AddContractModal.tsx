@@ -7,8 +7,7 @@ import { Property, Unit, Tenant } from "@/types";
 interface ContractTemplate {
   id: string;
   title: string;
-  file_url?: string;
-  category?: string;
+  content: string;
 }
 
 interface Props {
@@ -20,7 +19,6 @@ interface Props {
   tenants: Tenant[];
 }
 
-// Hilfsfunktion: Erkennt Finanzfelder flexibel
 function parseFinancials(source: any) {
   if (!source) return { cold: 0, util: 0, dep: 0 };
   const data = source.data || source.attributes || source.details || source;
@@ -65,16 +63,15 @@ export default function AddContractModal({
   units,
   tenants,
 }: Props) {
-  // Modal Schritt: 1 = Formulardaten & Muster-Wahl, 2 = Digitale Unterschrift
   const [step, setStep] = useState<1 | 2>(1);
 
-  // Formulardaten
   const [selectedPropertyId, setSelectedPropertyId] = useState("");
   const [selectedUnitId, setSelectedUnitId] = useState("");
   const [selectedTenantId, setSelectedTenantId] = useState("");
 
   const [templates, setTemplates] = useState<ContractTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [customContractText, setCustomContractText] = useState("");
 
   const [startDate, setStartDate] = useState(new Date().toISOString().split("T")[0]);
   const [coldRent, setColdRent] = useState("");
@@ -82,23 +79,20 @@ export default function AddContractModal({
   const [deposit, setDeposit] = useState("");
   const [noticePeriodMonths, setNoticePeriodMonths] = useState(3);
 
-  // Erstellter Vertrag (für Schritt 2)
   const [createdContractId, setCreatedContractId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Canvas für Unterschrift
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [hasSignature, setHasSignature] = useState(false);
 
-  // 1. Dokumente/Vertragsmuster & Reset beim Öffnen
+  // 1. Vertragsmuster aus der "documents" Tabelle in Supabase laden
   useEffect(() => {
     if (isOpen) {
       setStep(1);
       setSelectedPropertyId("");
       setSelectedUnitId("");
       setSelectedTenantId("");
-      setSelectedTemplateId("");
       setColdRent("");
       setUtilityCosts("");
       setDeposit("");
@@ -107,31 +101,36 @@ export default function AddContractModal({
       setCreatedContractId(null);
       setHasSignature(false);
 
-      // Vertragsmuster aus der Supabase "documents" oder "templates" Tabelle laden
       const loadTemplates = async () => {
         try {
           const { data, error } = await supabase
             .from("documents")
-            .select("*")
-            .or("category.eq.Mietvertrag,type.eq.template,category.eq.Vorlagen");
+            .select("id, title, content")
+            .or("category.eq.Mietvertrag,category.eq.Vorlagen,type.eq.template");
 
           if (!error && data && data.length > 0) {
-            setTemplates(data);
+            setTemplates(data as ContractTemplate[]);
             setSelectedTemplateId(data[0].id);
+            setCustomContractText(data[0].content || getDefaultTemplateText());
           } else {
-            // Fallback Muster-Optionen falls noch keine Vorlagen-Tabelle existiert
-            setTemplates([
-              { id: "standard-wohnung", title: "Standard-Wohnraummietvertrag 2026" },
-              { id: "staffelmiete", title: "Mietvertrag mit Staffelmiete" },
-              { id: "gewerbe", title: "Gewerbemietvertrag" },
-            ]);
-            setSelectedTemplateId("standard-wohnung");
+            const defaultList: ContractTemplate[] = [
+              {
+                id: "standard",
+                title: "Standard-Wohnraummietvertrag",
+                content: getDefaultTemplateText(),
+              },
+              {
+                id: "staffel",
+                title: "Mietvertrag mit Staffelmiete",
+                content: "§ 1 Mietobjekt & Parteien...\n§ 2 Vereinbarung zur Staffelmiete...\n§ 3 Sondervereinbarung...",
+              },
+            ];
+            setTemplates(defaultList);
+            setSelectedTemplateId("standard");
+            setCustomContractText(defaultList[0].content);
           }
         } catch {
-          setTemplates([
-            { id: "standard-wohnung", title: "Standard-Wohnraummietvertrag 2026" },
-          ]);
-          setSelectedTemplateId("standard-wohnung");
+          setCustomContractText(getDefaultTemplateText());
         }
       };
 
@@ -139,7 +138,43 @@ export default function AddContractModal({
     }
   }, [isOpen]);
 
-  // Finanzdaten berechnen
+  function getDefaultTemplateText() {
+    return `MIETVERTRAG FOR WOHNRAUM
+-----------------------------------
+Mietobjekt: {OBJEKT_ADRESSE}, Einheit {EINHEIT_NR}
+Mieter: {MIETER_NAME}
+
+1. MIETBEGINN & DAUER
+Der Mietvertrag beginnt am {MIETBEGINN}. Die Kündigungsfrist beträgt {KUENDIGUNGSFRIST} Monate.
+
+2. MIETE UND NEBENKOSTEN
+- Kaltmiete: {KALTMITE} €
+- Nebenkostenvorauszahlung: {NEBENKOSTEN} €
+- Kaution: {KAUTION} €
+
+3. SONDERVEREINBARUNGEN / INDIVIDUELLE KLAUSELN:
+(Hier können individuelle Ergänzungen eingetragen werden)`;
+  }
+
+  // Platzhalter dynamisch im Vertragstext ersetzen
+  const updateTemplatePlaceholders = useCallback(() => {
+    const prop = properties.find((p) => String(p.id) === String(selectedPropertyId));
+    const tenant = tenants.find((t) => String(t.id) === String(selectedTenantId));
+    const unit = units.find((u) => String(u.id) === String(selectedUnitId));
+
+    let updatedText = customContractText;
+    if (tenant) updatedText = updatedText.replaceAll("{MIETER_NAME}", `${tenant.first_name || ""} ${tenant.last_name || ""}`.trim());
+    if (prop) updatedText = updatedText.replaceAll("{OBJEKT_ADRESSE}", prop.name || prop.address || "");
+    if (unit) updatedText = updatedText.replaceAll("{EINHEIT_NR}", String(unit.unit_number || unit.id));
+    if (startDate) updatedText = updatedText.replaceAll("{MIETBEGINN}", startDate);
+    if (noticePeriodMonths) updatedText = updatedText.replaceAll("{KUENDIGUNGSFRIST}", String(noticePeriodMonths));
+    if (coldRent) updatedText = updatedText.replaceAll("{KALTMITE}", coldRent);
+    if (utilityCosts) updatedText = updatedText.replaceAll("{NEBENKOSTEN}", utilityCosts);
+    if (deposit) updatedText = updatedText.replaceAll("{KAUTION}", deposit);
+
+    setCustomContractText(updatedText);
+  }, [selectedPropertyId, selectedTenantId, selectedUnitId, startDate, noticePeriodMonths, coldRent, utilityCosts, deposit, properties, tenants, units]);
+
   const applyFinancials = useCallback(
     async (unitObj?: any, tenantObj?: any, unitId?: string, tenantId?: string) => {
       const unitFin = parseFinancials(unitObj);
@@ -184,7 +219,6 @@ export default function AddContractModal({
 
   if (!isOpen) return null;
 
-  // Filter
   const filteredUnits = units.filter(
     (u) => !selectedPropertyId || String(u.property_id) === String(selectedPropertyId)
   );
@@ -192,14 +226,10 @@ export default function AddContractModal({
     (t) => !selectedUnitId || String(t.unit_id) === String(selectedUnitId)
   );
 
-  // Handlers für Dropdowns
   const handlePropertyChange = (propertyId: string) => {
     setSelectedPropertyId(propertyId);
     setSelectedUnitId("");
     setSelectedTenantId("");
-    setColdRent("");
-    setUtilityCosts("");
-    setDeposit("");
   };
 
   const handleUnitChange = async (unitId: string) => {
@@ -234,22 +264,21 @@ export default function AddContractModal({
     await applyFinancials(unitObj, tenant, unitIdToUse, tenantId);
   };
 
-  const handleColdRentChange = (val: string) => {
-    setColdRent(val);
-    const parsedCold = parseFloat(val);
-    if (!isNaN(parsedCold) && parsedCold > 0) {
-      setDeposit(String(parsedCold * 3));
+  const handleTemplateChange = (tmplId: string) => {
+    setSelectedTemplateId(tmplId);
+    const tmpl = templates.find((t) => String(t.id) === String(tmplId));
+    if (tmpl && tmpl.content) {
+      setCustomContractText(tmpl.content);
     }
   };
 
-  // Schritt 1: Vertrag in DB anlegen
+  // Erstellen ohne nicht-existierende Datenbank-Spalten
   const handleCreateContract = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
 
     const prop = properties.find((p) => String(p.id) === String(selectedPropertyId));
     const tenant = tenants.find((t) => String(t.id) === String(selectedTenantId));
-    const templateObj = templates.find((tmpl) => String(tmpl.id) === String(selectedTemplateId));
 
     const tenantName = tenant
       ? `${tenant.first_name || ""} ${tenant.last_name || ""}`.trim()
@@ -262,38 +291,40 @@ export default function AddContractModal({
     const numDep = parseFloat(deposit) || 0;
 
     try {
+      // Nur Standard-Felder senden, um DB Schema Cache Fehler zu vermeiden
+      const contractPayload: any = {
+        tenant_id: selectedTenantId || null,
+        tenant_name: tenantName,
+        unit_id: selectedUnitId || null,
+        property_id: selectedPropertyId || null,
+        property_address: propAddress,
+        start_date: startDate,
+        cold_rent: numCold,
+        utility_costs: numUtil,
+        deposit: numDep,
+        notice_period_months: Number(noticePeriodMonths),
+        is_archived: false,
+      };
+
       const { data: newContract, error: contractErr } = await supabase
         .from("contracts")
-        .insert([
-          {
-            tenant_id: selectedTenantId || null,
-            tenant_name: tenantName,
-            unit_id: selectedUnitId || null,
-            property_id: selectedPropertyId || null,
-            property_address: propAddress,
-            template_id: selectedTemplateId || null,
-            template_title: templateObj?.title || "Standard-Mietvertrag",
-            start_date: startDate,
-            cold_rent: numCold,
-            utility_costs: numUtil,
-            deposit: numDep,
-            notice_period_months: Number(noticePeriodMonths),
-            status: "Entwurf_Unterschrift_ausstehend",
-            is_archived: false,
-          },
-        ])
+        .insert([contractPayload])
         .select()
         .single();
 
       if (contractErr) throw contractErr;
 
-      // Mieter & Einheit synchen
-      if (selectedUnitId) {
-        await supabase
-          .from("units")
-          .update({ notice_period_months: Number(noticePeriodMonths) })
-          .eq("id", selectedUnitId);
-      }
+      // 2. Dokument / Vertragstext in der Tabelle "documents" ablegen (Damit es unter Dokumente sichtbar ist)
+      await supabase.from("documents").insert([
+        {
+          title: `Mietvertrag - ${tenantName} (${propAddress})`,
+          category: "Mietverträge",
+          content: customContractText,
+          property_id: selectedPropertyId || null,
+          tenant_id: selectedTenantId || null,
+          created_at: new Date().toISOString(),
+        },
+      ]);
 
       if (selectedTenantId) {
         await supabase
@@ -311,7 +342,7 @@ export default function AddContractModal({
       }
 
       setCreatedContractId(newContract.id);
-      setStep(2); // Direkt weiter zur digitalen Unterschrift!
+      setStep(2);
     } catch (err: any) {
       alert("Fehler beim Erstellen des Vertrags: " + err.message);
     } finally {
@@ -319,7 +350,7 @@ export default function AddContractModal({
     }
   };
 
-  // Canvas-Zeichenfunktionen für Unterschrift
+  // Canvas Unterschrift
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     setIsDrawing(true);
     const canvas = canvasRef.current;
@@ -355,10 +386,6 @@ export default function AddContractModal({
     setHasSignature(true);
   };
 
-  const stopDrawing = () => {
-    setIsDrawing(false);
-  };
-
   const clearSignature = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -369,7 +396,6 @@ export default function AddContractModal({
     }
   };
 
-  // Schritt 2: Unterschrift speichern & Vertrag abschließen
   const handleSaveSignature = async () => {
     if (!createdContractId || !hasSignature) return;
     setSubmitting(true);
@@ -378,7 +404,6 @@ export default function AddContractModal({
       const canvas = canvasRef.current;
       const signatureDataUrl = canvas ? canvas.toDataURL("image/png") : null;
 
-      // Vertrag in DB als unterschrieben markieren
       await supabase
         .from("contracts")
         .update({
@@ -399,8 +424,7 @@ export default function AddContractModal({
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-5 border border-slate-200">
-        {/* Header */}
+      <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-6 space-y-4 border border-slate-200 max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center border-b border-slate-100 pb-3">
           <div>
             <h3 className="font-bold text-slate-900 text-base">
@@ -408,35 +432,39 @@ export default function AddContractModal({
             </h3>
             <p className="text-slate-500 text-xs">
               {step === 1
-                ? "Erfasse die Vertragsdaten & wähle ein Vertragsmuster aus Dokumente."
+                ? "Wähle ein Vertragsmuster aus Dokumente und passe Freitexte bei Bedarf an."
                 : "Bitte hier für den Mietvertrag unterschreiben."}
             </p>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-lg">
-            ✕
-          </button>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-lg">✕</button>
         </div>
 
-        {/* SCHRITT 1: Vertragsdaten & Muster */}
         {step === 1 && (
           <form onSubmit={handleCreateContract} className="space-y-4 text-xs">
-            {/* Vertragsmuster aus "Dokumente" */}
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">
-                Vertragsmuster / Vorlage (aus Dokumente)
-              </label>
-              <select
-                value={selectedTemplateId}
-                onChange={(e) => setSelectedTemplateId(e.target.value)}
-                className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 bg-white font-medium text-slate-800"
-                required
+            {/* Vorlage wählen */}
+            <div className="flex justify-between items-end gap-2">
+              <div className="flex-1">
+                <label className="block font-semibold text-slate-700 mb-1">Vertragsmuster / Vorlage (aus Dokumente)</label>
+                <select
+                  value={selectedTemplateId}
+                  onChange={(e) => handleTemplateChange(e.target.value)}
+                  className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 bg-white font-medium"
+                >
+                  {templates.map((tmpl) => (
+                    <option key={tmpl.id} value={tmpl.id}>
+                      📄 {tmpl.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                type="button"
+                onClick={updateTemplatePlaceholders}
+                className="px-3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg text-xs"
+                title="Ersetzt {MIETER_NAME}, {KALTMITE} etc. im Text"
               >
-                {templates.map((tmpl) => (
-                  <option key={tmpl.id} value={tmpl.id}>
-                    📄 {tmpl.title}
-                  </option>
-                ))}
-              </select>
+                🔄 Werte einsetzen
+              </button>
             </div>
 
             {/* Objekt & Einheit */}
@@ -451,9 +479,7 @@ export default function AddContractModal({
                 >
                   <option value="">-- Objekt wählen --</option>
                   {properties.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name || p.address}
-                    </option>
+                    <option key={p.id} value={p.id}>{p.name || p.address}</option>
                   ))}
                 </select>
               </div>
@@ -468,9 +494,7 @@ export default function AddContractModal({
                 >
                   <option value="">-- Einheit wählen --</option>
                   {filteredUnits.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      Einheit {u.unit_number || u.id}
-                    </option>
+                    <option key={u.id} value={u.id}>Einheit {u.unit_number || u.id}</option>
                   ))}
                 </select>
               </div>
@@ -487,9 +511,7 @@ export default function AddContractModal({
               >
                 <option value="">-- Mieter wählen --</option>
                 {filteredTenants.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.first_name} {t.last_name}
-                  </option>
+                  <option key={t.id} value={t.id}>{t.first_name} {t.last_name}</option>
                 ))}
               </select>
             </div>
@@ -521,7 +543,7 @@ export default function AddContractModal({
               </div>
             </div>
 
-            {/* Finanzen */}
+            {/* Mieten */}
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">Kaltmiete (€)</label>
@@ -530,7 +552,7 @@ export default function AddContractModal({
                   step="0.01"
                   placeholder="0.00"
                   value={coldRent}
-                  onChange={(e) => handleColdRentChange(e.target.value)}
+                  onChange={(e) => setColdRent(e.target.value)}
                   className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -558,6 +580,20 @@ export default function AddContractModal({
               </div>
             </div>
 
+            {/* Individualisierbarer Vertragstext / Vorlage bearbeiten */}
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">
+                Vertragstext / Individuelle Klauseln & Ergänzungen bearbeiten
+              </label>
+              <textarea
+                rows={6}
+                value={customContractText}
+                onChange={(e) => setCustomContractText(e.target.value)}
+                className="w-full p-3 border border-slate-300 rounded-lg font-mono text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50"
+                placeholder="Hier steht der Vertragstext. Du kannst ihn direkt hier für diesen Vertrag bearbeiten..."
+              />
+            </div>
+
             <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
               <button
                 type="button"
@@ -571,7 +607,7 @@ export default function AddContractModal({
                 disabled={submitting}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg disabled:opacity-50"
               >
-                {submitting ? "Erstelle Vertrag..." : "Weiter zur Unterschrift ➔"}
+                {submitting ? "Erstelle..." : "Vertrag erstellen & Unterschreiben ➔"}
               </button>
             </div>
           </form>
@@ -580,21 +616,17 @@ export default function AddContractModal({
         {/* SCHRITT 2: Digitale Unterschrift */}
         {step === 2 && (
           <div className="space-y-4 text-xs">
-            <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-900">
-              <p className="font-semibold">Vertrag wurde als Entwurf angelegt!</p>
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900">
+              <p className="font-semibold">✓ Vertrag & Dokument wurden angelegt!</p>
               <p className="text-slate-600 mt-1">
-                Leiste hier die digitale Unterschrift, um das gewählte Vertragsmuster direkt zu unterzeichnen.
+                Leiste hier die digitale Unterschrift. Das fertige Dokument wird direkt unter Dokumente archiviert.
               </p>
             </div>
 
             <div>
               <div className="flex justify-between items-center mb-1">
                 <label className="font-semibold text-slate-700">Unterschrift-Feld</label>
-                <button
-                  type="button"
-                  onClick={clearSignature}
-                  className="text-red-500 hover:underline text-xs"
-                >
+                <button type="button" onClick={clearSignature} className="text-red-500 hover:underline text-xs">
                   Zurücksetzen
                 </button>
               </div>
@@ -602,28 +634,24 @@ export default function AddContractModal({
               <div className="border-2 border-dashed border-slate-300 rounded-xl bg-slate-50 overflow-hidden touch-none">
                 <canvas
                   ref={canvasRef}
-                  width={450}
+                  width={550}
                   height={160}
                   onMouseDown={startDrawing}
                   onMouseMove={draw}
-                  onMouseUp={stopDrawing}
-                  onMouseLeave={stopDrawing}
+                  onMouseUp={() => setIsDrawing(false)}
+                  onMouseLeave={() => setIsDrawing(false)}
                   onTouchStart={startDrawing}
                   onTouchMove={draw}
-                  onTouchEnd={stopDrawing}
+                  onTouchEnd={() => setIsDrawing(false)}
                   className="w-full h-40 cursor-crosshair bg-white"
                 />
               </div>
-              <p className="text-center text-slate-400 mt-1 text-[11px]">
-                Mit Maus oder Finger in dem Feld unterschreiben
-              </p>
             </div>
 
             <div className="flex justify-between items-center pt-3 border-t border-slate-100">
               <button
                 type="button"
                 onClick={() => {
-                  // Ohne Unterschrift schließen (Verbleibt als Entwurf)
                   onSuccess();
                   onClose();
                 }}
@@ -638,7 +666,7 @@ export default function AddContractModal({
                 disabled={!hasSignature || submitting}
                 className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg disabled:opacity-50"
               >
-                {submitting ? "Speichere..." : "Vertrag rechtssicher unterschreiben ✓"}
+                {submitting ? "Speichere..." : "Digital unterschreiben ✓"}
               </button>
             </div>
           </div>
