@@ -32,86 +32,75 @@ export default function AddContractModal({
   const [noticePeriodMonths, setNoticePeriodMonths] = useState(3);
   const [submitting, setSubmitting] = useState(false);
 
-  // Auto-Fill Berechnung für Miete, NK und 3x Kaution
-  const autoFillFinancials = useCallback(
-    (tId: string, uId: string) => {
-      const tenant = tenants.find((t) => String(t.id) === String(tId));
-      const unit = units.find((u) => String(u.id) === String(uId));
+  // Direktes Abfragen der Datenbank für Mieter und Einheit
+  const fetchAndFillFinancials = useCallback(async (tenantId: string, unitId: string) => {
+    let cold = 0;
+    let util = 0;
+    let dep = 0;
 
-      const tAny = (tenant || {}) as any;
-      const uAny = (unit || {}) as any;
-
-      const rawCold =
-        tAny.cold_rent ??
-        tAny.rent ??
-        tAny.kaltmiete ??
-        tAny.monthly_rent ??
-        uAny.cold_rent ??
-        uAny.rent ??
-        uAny.kaltmiete ??
-        0;
-
-      const rawUtil =
-        tAny.utility_costs ??
-        tAny.nebenkosten ??
-        tAny.utility_cost ??
-        uAny.utility_costs ??
-        uAny.nebenkosten ??
-        0;
-
-      const rawDep =
-        tAny.deposit ??
-        tAny.kaution ??
-        uAny.deposit ??
-        uAny.kaution ??
-        0;
-
-      const numCold = parseFloat(rawCold) || 0;
-      const numUtil = parseFloat(rawUtil) || 0;
-      let numDep = parseFloat(rawDep) || 0;
-
-      // Falls keine Kaution beim Mieter steht, automatisch 3x Kaltmiete setzen
-      if (!numDep && numCold > 0) {
-        numDep = numCold * 3;
+    // 1. Einheit aus DB abfragen
+    if (unitId) {
+      const { data: u } = await supabase.from("units").select("*").eq("id", unitId).single();
+      if (u) {
+        cold = parseFloat(u.cold_rent || u.rent || u.base_rent || u.rent_amount || u.monthly_rent || u.kaltmiete || 0);
+        util = parseFloat(u.utility_costs || u.nebenkosten || u.utilities || u.additional_costs || 0);
+        dep = parseFloat(u.deposit || u.kaution || u.security_deposit || 0);
       }
+    }
 
-      if (numCold > 0) setColdRent(String(numCold));
-      if (numUtil > 0) setUtilityCosts(String(numUtil));
-      if (numDep > 0) setDeposit(String(numDep));
-    },
-    [tenants, units]
-  );
+    // 2. Mieter aus DB abfragen (falls bei Einheit nichts hinterlegt war)
+    if (tenantId) {
+      const { data: t } = await supabase.from("tenants").select("*").eq("id", tenantId).single();
+      if (t) {
+        if (!cold) cold = parseFloat(t.cold_rent || t.rent || t.base_rent || t.rent_amount || t.monthly_rent || t.kaltmiete || 0);
+        if (!util) util = parseFloat(t.utility_costs || t.nebenkosten || t.utilities || t.additional_costs || 0);
+        if (!dep) dep = parseFloat(t.deposit || t.kaution || t.security_deposit || 0);
+      }
+    }
 
-  // Automatischer Aufruf direkt beim Öffnen des Modals
+    // 3. Automatischer Fallback: Kaution = 3x Kaltmiete
+    if (!dep && cold > 0) {
+      dep = cold * 3;
+    }
+
+    setColdRent(cold > 0 ? String(cold) : "");
+    setUtilityCosts(util > 0 ? String(util) : "");
+    setDeposit(dep > 0 ? String(dep) : "");
+  }, []);
+
+  // Ersteinrichtung beim Öffnen des Modals
   useEffect(() => {
     if (!isOpen) return;
 
-    let curTenantId = selectedTenantId;
-    let curUnitId = selectedUnitId;
-    let curPropId = selectedPropertyId;
+    const initializeModal = async () => {
+      let tId = selectedTenantId;
+      let uId = selectedUnitId;
+      let pId = selectedPropertyId;
 
-    // Falls noch kein Mieter gewählt ist, den ersten verfügbaren Mieter wählen
-    if (!curTenantId && tenants.length > 0) {
-      curTenantId = String(tenants[0].id);
-      setSelectedTenantId(curTenantId);
-    }
-
-    const tenant = tenants.find((t) => String(t.id) === String(curTenantId));
-    if (tenant && tenant.unit_id && !curUnitId) {
-      curUnitId = String(tenant.unit_id);
-      setSelectedUnitId(curUnitId);
-    }
-
-    if (curUnitId && !curPropId) {
-      const unit = units.find((u) => String(u.id) === String(curUnitId));
-      if (unit && unit.property_id) {
-        curPropId = String(unit.property_id);
-        setSelectedPropertyId(curPropId);
+      if (!tId && tenants.length > 0) {
+        tId = String(tenants[0].id);
+        setSelectedTenantId(tId);
       }
-    }
 
-    autoFillFinancials(curTenantId, curUnitId);
-  }, [isOpen, selectedTenantId, selectedUnitId, selectedPropertyId, tenants, units, autoFillFinancials]);
+      const tenant = tenants.find((t) => String(t.id) === String(tId));
+      if (tenant && tenant.unit_id && !uId) {
+        uId = String(tenant.unit_id);
+        setSelectedUnitId(uId);
+      }
+
+      if (uId && !pId) {
+        const unit = units.find((u) => String(u.id) === String(uId));
+        if (unit && unit.property_id) {
+          pId = String(unit.property_id);
+          setSelectedPropertyId(pId);
+        }
+      }
+
+      await fetchAndFillFinancials(tId, uId);
+    };
+
+    initializeModal();
+  }, [isOpen, selectedTenantId, selectedUnitId, selectedPropertyId, tenants, units, fetchAndFillFinancials]);
 
   if (!isOpen) return null;
 
@@ -123,7 +112,7 @@ export default function AddContractModal({
     (t) => !selectedUnitId || String(t.unit_id) === String(selectedUnitId)
   );
 
-  const handleUnitChange = (unitId: string) => {
+  const handleUnitChange = async (unitId: string) => {
     setSelectedUnitId(unitId);
     const unit = units.find((u) => String(u.id) === String(unitId));
     
@@ -135,11 +124,11 @@ export default function AddContractModal({
       const tenantIdToUse = matchingTenant ? String(matchingTenant.id) : selectedTenantId;
       if (matchingTenant) setSelectedTenantId(tenantIdToUse);
 
-      autoFillFinancials(tenantIdToUse, unitId);
+      await fetchAndFillFinancials(tenantIdToUse, unitId);
     }
   };
 
-  const handleTenantChange = (tenantId: string) => {
+  const handleTenantChange = async (tenantId: string) => {
     setSelectedTenantId(tenantId);
     const tenant = tenants.find((t) => String(t.id) === String(tenantId));
 
@@ -154,7 +143,7 @@ export default function AddContractModal({
       }
     }
 
-    autoFillFinancials(tenantId, unitIdToUse);
+    await fetchAndFillFinancials(tenantId, unitIdToUse);
   };
 
   const handleColdRentChange = (val: string) => {
@@ -185,7 +174,6 @@ export default function AddContractModal({
     const numDep = parseFloat(deposit) || 0;
 
     try {
-      // 1. Vertrag in DB anlegen
       const { error: contractErr } = await supabase.from("contracts").insert([
         {
           tenant_id: selectedTenantId || null,
@@ -204,7 +192,6 @@ export default function AddContractModal({
 
       if (contractErr) throw contractErr;
 
-      // 2. Kündigungsfrist bei Einheit aktualisieren
       if (selectedUnitId) {
         await supabase
           .from("units")
@@ -212,7 +199,6 @@ export default function AddContractModal({
           .eq("id", selectedUnitId);
       }
 
-      // 3. Mieter-Stammdaten synchronisieren
       if (selectedTenantId) {
         await supabase
           .from("tenants")
@@ -249,7 +235,6 @@ export default function AddContractModal({
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-          {/* Objekt & Einheit */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block font-semibold text-slate-700 mb-1">Objekt</label>
@@ -289,7 +274,6 @@ export default function AddContractModal({
             </div>
           </div>
 
-          {/* Mieter */}
           <div>
             <label className="block font-semibold text-slate-700 mb-1">Mieter</label>
             <select
@@ -307,7 +291,6 @@ export default function AddContractModal({
             </select>
           </div>
 
-          {/* Datum & Kündigungsfrist */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block font-semibold text-slate-700 mb-1">Mietbeginn</label>
@@ -334,7 +317,6 @@ export default function AddContractModal({
             </div>
           </div>
 
-          {/* Finanzen */}
           <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="block font-semibold text-slate-700 mb-1">Kaltmiete (€)</label>
