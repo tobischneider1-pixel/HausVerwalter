@@ -20,6 +20,7 @@ import AddTenantModal from "@/components/modals/AddTenantModal";
 import AddPaymentModal from "@/components/modals/AddPaymentModal";
 
 import ContractsTab from "@/components/tabs/ContractsTab";
+import DocumentsTab from "@/components/tabs/DocumentsTab";
 
 export default function Page() {
   const [activeTab, setActiveTab] = useState("Überblick");
@@ -90,7 +91,10 @@ export default function Page() {
           )}
           {activeTab === "Verträge" && (
             <ContractsTab properties={properties} units={units} tenants={tenants} onRefresh={fetchData} />
-          )}  
+          )}
+          {activeTab === "Dokumente" && (
+            <DocumentsTab properties={properties} units={units} tenants={tenants} />
+          )}
         </main>
       </div>
 
