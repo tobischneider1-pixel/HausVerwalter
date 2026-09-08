@@ -13,6 +13,49 @@ interface Props {
   tenants: Tenant[];
 }
 
+// Hilfsfunktion: Prüft flexibel alle bekannten Feldbezeichnungen für Kaltmiete, Nebenkosten & Kaution
+function parseFinancials(source: any) {
+  if (!source) return { cold: 0, util: 0, dep: 0 };
+  const data = source.data || source.attributes || source.details || source;
+
+  const findVal = (...keys: string[]): number => {
+    for (const key of keys) {
+      if (data[key] !== undefined && data[key] !== null && data[key] !== "") {
+        const parsed = parseFloat(String(data[key]).replace(",", "."));
+        if (!isNaN(parsed) && parsed > 0) return parsed;
+      }
+    }
+    return 0;
+  };
+
+  const cold = findVal("cold_rent", "kaltmiete", "rent", "base_rent", "rent_amount", "monthly_rent", "net_rent");
+
+  let util = findVal(
+    "utility_costs",
+    "utility_cost",
+    "nebenkosten",
+    "nebenkosten_vorauszahlung",
+    "betriebskosten",
+    "utilities",
+    "additional_costs",
+    "nk",
+    "nk_amount",
+    "nk_vorauszahlung",
+    "service_charges",
+    "extra_costs"
+  );
+
+  // Falls Nebenkosten nicht als eigenes Feld existieren, versuche aus Warmmiete - Kaltmiete zu berechnen
+  const warm = findVal("warm_rent", "warmmiete", "total_rent", "gross_rent");
+  if (!util && warm > 0 && cold > 0 && warm > cold) {
+    util = warm - cold;
+  }
+
+  const dep = findVal("deposit", "kaution", "security_deposit", "deposit_amount");
+
+  return { cold, util, dep };
+}
+
 export default function AddContractModal({
   isOpen,
   onClose,
@@ -32,7 +75,7 @@ export default function AddContractModal({
   const [noticePeriodMonths, setNoticePeriodMonths] = useState(3);
   const [submitting, setSubmitting] = useState(false);
 
-  // 1. Beim Öffnen des Modals alle Feldauswahlen komplett zurücksetzen (Dropdowns leer starten)
+  // 1. Beim Öffnen des Modals alle Auswahlen und Felder zurücksetzen
   useEffect(() => {
     if (isOpen) {
       setSelectedPropertyId("");
@@ -46,71 +89,56 @@ export default function AddContractModal({
     }
   }, [isOpen]);
 
-  // 2. Abfragen der Finanzwerte direkt aus Supabase mit erweiterten Feldnamen für Nebenkosten
-  const fetchAndFillFinancials = useCallback(async (tenantId: string, unitId: string) => {
-    let cold = 0;
-    let util = 0;
-    let dep = 0;
+  // 2. Finanzdaten ermitteln (erst synchron aus Props, dann als Fallback aus Supabase)
+  const applyFinancials = useCallback(
+    async (unitObj?: any, tenantObj?: any, unitId?: string, tenantId?: string) => {
+      // Step A: Aus lokal vorhandenen Props extrahieren
+      const unitFin = parseFinancials(unitObj);
+      const tenantFin = parseFinancials(tenantObj);
 
-    // A) Werte von der Einheit abrufen
-    if (unitId) {
-      const { data: u } = await supabase.from("units").select("*").eq("id", unitId).single();
-      if (u) {
-        const rawCold = u.cold_rent ?? u.rent ?? u.base_rent ?? u.rent_amount ?? u.monthly_rent ?? u.kaltmiete ?? 0;
-        const rawUtil =
-          u.utility_costs ??
-          u.nebenkosten ??
-          u.utilities ??
-          u.utility_cost ??
-          u.additional_costs ??
-          u.nebenkosten_vorauszahlung ??
-          u.betriebskosten ??
-          u.nk ??
-          0;
-        const rawDep = u.deposit ?? u.kaution ?? u.security_deposit ?? 0;
+      let cold = unitFin.cold || tenantFin.cold || 0;
+      let util = unitFin.util || tenantFin.util || 0;
+      let dep = unitFin.dep || tenantFin.dep || (cold > 0 ? cold * 3 : 0);
 
-        if (rawCold) cold = parseFloat(rawCold);
-        if (rawUtil) util = parseFloat(rawUtil);
-        if (rawDep) dep = parseFloat(rawDep);
+      // Sofort ins UI schreiben
+      if (cold > 0) setColdRent(String(cold));
+      if (util > 0) setUtilityCosts(String(util));
+      if (dep > 0) setDeposit(String(dep));
+
+      // Step B: Falls ein Wert noch fehlt, Supabase abfragen
+      if ((!cold || !util || !dep) && (unitId || tenantId)) {
+        try {
+          let dbUnitFin = { cold: 0, util: 0, dep: 0 };
+          let dbTenantFin = { cold: 0, util: 0, dep: 0 };
+
+          if (unitId) {
+            const { data } = await supabase.from("units").select("*").eq("id", unitId).maybeSingle();
+            if (data) dbUnitFin = parseFinancials(data);
+          }
+
+          if (tenantId) {
+            const { data } = await supabase.from("tenants").select("*").eq("id", tenantId).maybeSingle();
+            if (data) dbTenantFin = parseFinancials(data);
+          }
+
+          if (!cold) cold = dbUnitFin.cold || dbTenantFin.cold || 0;
+          if (!util) util = dbUnitFin.util || dbTenantFin.util || 0;
+          if (!dep) dep = dbUnitFin.dep || dbTenantFin.dep || (cold > 0 ? cold * 3 : 0);
+
+          if (cold > 0) setColdRent(String(cold));
+          if (util > 0) setUtilityCosts(String(util));
+          if (dep > 0) setDeposit(String(dep));
+        } catch (err) {
+          console.error("Fehler beim Laden der Finanzdaten:", err);
+        }
       }
-    }
-
-    // B) Werte vom Mieter abrufen (falls bei der Einheit nicht hinterlegt)
-    if (tenantId) {
-      const { data: t } = await supabase.from("tenants").select("*").eq("id", tenantId).single();
-      if (t) {
-        const rawCold = t.cold_rent ?? t.rent ?? t.base_rent ?? t.rent_amount ?? t.monthly_rent ?? t.kaltmiete ?? 0;
-        const rawUtil =
-          t.utility_costs ??
-          t.nebenkosten ??
-          t.utilities ??
-          t.utility_cost ??
-          t.additional_costs ??
-          t.nebenkosten_vorauszahlung ??
-          t.betriebskosten ??
-          t.nk ??
-          0;
-        const rawDep = t.deposit ?? t.kaution ?? t.security_deposit ?? 0;
-
-        if (!cold && rawCold) cold = parseFloat(rawCold);
-        if (!util && rawUtil) util = parseFloat(rawUtil);
-        if (!dep && rawDep) dep = parseFloat(rawDep);
-      }
-    }
-
-    // C) Automatische Kaution: 3x Kaltmiete, falls keine spezifische Kaution angegeben ist
-    if (!dep && cold > 0) {
-      dep = cold * 3;
-    }
-
-    setColdRent(cold > 0 ? String(cold) : "");
-    setUtilityCosts(util > 0 ? String(util) : "");
-    setDeposit(dep > 0 ? String(dep) : "");
-  }, []);
+    },
+    []
+  );
 
   if (!isOpen) return null;
 
-  // Filterung für Dropdowns
+  // Filter für Dropdowns
   const filteredUnits = units.filter(
     (u) => !selectedPropertyId || String(u.property_id) === String(selectedPropertyId)
   );
@@ -119,7 +147,7 @@ export default function AddContractModal({
     (t) => !selectedUnitId || String(t.unit_id) === String(selectedUnitId)
   );
 
-  // Objekt-Auswahl
+  // Handler: Objekt geändert
   const handlePropertyChange = (propertyId: string) => {
     setSelectedPropertyId(propertyId);
     setSelectedUnitId("");
@@ -129,9 +157,17 @@ export default function AddContractModal({
     setDeposit("");
   };
 
-  // Einheiten-Auswahl
+  // Handler: Einheit geändert
   const handleUnitChange = async (unitId: string) => {
     setSelectedUnitId(unitId);
+
+    if (!unitId) {
+      setColdRent("");
+      setUtilityCosts("");
+      setDeposit("");
+      return;
+    }
+
     const unit = units.find((u) => String(u.id) === String(unitId));
 
     if (unit) {
@@ -142,30 +178,35 @@ export default function AddContractModal({
       const tenantIdToUse = matchingTenant ? String(matchingTenant.id) : selectedTenantId;
       if (matchingTenant) setSelectedTenantId(tenantIdToUse);
 
-      await fetchAndFillFinancials(tenantIdToUse, unitId);
+      await applyFinancials(unit, matchingTenant, unitId, tenantIdToUse);
     }
   };
 
-  // Mieter-Auswahl
+  // Handler: Mieter geändert
   const handleTenantChange = async (tenantId: string) => {
     setSelectedTenantId(tenantId);
+
+    if (!tenantId) return;
+
     const tenant = tenants.find((t) => String(t.id) === String(tenantId));
 
     let unitIdToUse = selectedUnitId;
+    let unitObj = units.find((u) => String(u.id) === String(unitIdToUse));
+
     if (tenant && tenant.unit_id) {
       unitIdToUse = String(tenant.unit_id);
       setSelectedUnitId(unitIdToUse);
 
-      const unit = units.find((u) => String(u.id) === unitIdToUse);
-      if (unit && unit.property_id) {
-        setSelectedPropertyId(String(unit.property_id));
+      unitObj = units.find((u) => String(u.id) === unitIdToUse);
+      if (unitObj && unitObj.property_id) {
+        setSelectedPropertyId(String(unitObj.property_id));
       }
     }
 
-    await fetchAndFillFinancials(tenantId, unitIdToUse);
+    await applyFinancials(unitObj, tenant, unitIdToUse, tenantId);
   };
 
-  // Kaltmiete manuell ändern -> berechnet Kaution dynamisch
+  // Kaltmiete manuell anpassen -> berechnet Kaution als 3x Kaltmiete voraus
   const handleColdRentChange = (val: string) => {
     setColdRent(val);
     const parsedCold = parseFloat(val);
@@ -194,7 +235,7 @@ export default function AddContractModal({
     const numDep = parseFloat(deposit) || 0;
 
     try {
-      // 1. Vertrag in Supabase anlegen
+      // 1. Mietvertrag in Supabase anlegen
       const { error: contractErr } = await supabase.from("contracts").insert([
         {
           tenant_id: selectedTenantId || null,
@@ -221,7 +262,7 @@ export default function AddContractModal({
           .eq("id", selectedUnitId);
       }
 
-      // 3. Mieter-Stammdaten aktualisieren
+      // 3. Mieter-Stammdaten mit Mietpreisen synchronisieren
       if (selectedTenantId) {
         await supabase
           .from("tenants")
