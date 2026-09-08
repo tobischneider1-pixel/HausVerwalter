@@ -19,6 +19,7 @@ export interface ContractPreviewData {
   propertyId?: string;
   unitId?: string;
   tenantId?: string;
+  templateContent?: string; // Text des geladenen Musters
 }
 
 interface Props {
@@ -34,10 +35,21 @@ export default function ContractPreviewModal({
   onSaveSuccess,
   data,
 }: Props) {
-  // Bearbeitbarer Freitext / Sondervereinbarungen
+  // Alle Vertragsdaten im State editierbar machen
+  const [vermieter, setVermieter] = useState(data.vermieterName || "");
+  const [vermieterAdr, setVermieterAdr] = useState(data.vermieterAdresse || "");
+  const [mieter, setMieter] = useState(data.mieterName || "");
+  const [objekt, setObjekt] = useState(data.objektName || "");
+  const [einheit, setEinheit] = useState(data.einheitNr || "");
+  const [mietbeginn, setMietbeginn] = useState(data.mietbeginn || "");
+  
+  const [kaltmiete, setKaltmiete] = useState(String(data.kaltmiete || 0));
+  const [nebenkosten, setNebenkosten] = useState(String(data.nebenkosten || 0));
+  const [kaution, setKaution] = useState(String(data.kaution || 0));
+  
   const [customNotes, setCustomNotes] = useState(data.sondervereinbarungen || "Keine besonderen Vereinbarungen.");
 
-  // Unterschriften Canvases
+  // Canvas Refs für Unterschriften
   const canvasMieterRef = useRef<HTMLCanvasElement | null>(null);
   const canvasVermieterRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -51,6 +63,15 @@ export default function ContractPreviewModal({
 
   useEffect(() => {
     if (isOpen) {
+      setVermieter(data.vermieterName || "Hausverwaltung / Vermieter");
+      setVermieterAdr(data.vermieterAdresse || "Musterstraße 1, 12345 Stadt");
+      setMieter(data.mieterName || "");
+      setObjekt(data.objektName || "");
+      setEinheit(data.einheitNr || "");
+      setMietbeginn(data.mietbeginn || new Date().toISOString().split("T")[0]);
+      setKaltmiete(String(data.kaltmiete || 0));
+      setNebenkosten(String(data.nebenkosten || 0));
+      setKaution(String(data.kaution || 0));
       setCustomNotes(data.sondervereinbarungen || "Keine besonderen Vereinbarungen.");
       setHasTenantSig(false);
       setHasLandlordSig(false);
@@ -59,13 +80,12 @@ export default function ContractPreviewModal({
 
   if (!isOpen) return null;
 
-  // Berechnungen & Absicherungen gegen NaN
-  const kalt = Number(data.kaltmiete) || 0;
-  const nk = Number(data.nebenkosten) || 0;
-  const gesamt = kalt + nk;
-  const kaution = Number(data.kaution) || 0;
+  const kaltNum = Number(kaltmiete) || 0;
+  const nkNum = Number(nebenkosten) || 0;
+  const gesamtNum = kaltNum + nkNum;
+  const kautionNum = Number(kaution) || 0;
 
-  // Canvas Drawing Helpers
+  // Unterschriften-Zeichnen Helper
   const startDrawing = (
     e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>,
     canvas: HTMLCanvasElement | null,
@@ -75,11 +95,9 @@ export default function ContractPreviewModal({
     setIsDrawing(true);
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-
     const rect = canvas.getBoundingClientRect();
     const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
     const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
-
     ctx.beginPath();
     ctx.moveTo(clientX - rect.left, clientY - rect.top);
   };
@@ -93,15 +111,12 @@ export default function ContractPreviewModal({
     if (!isDrawing || !canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-
     const rect = canvas.getBoundingClientRect();
     const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
     const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
-
     ctx.lineWidth = 2;
     ctx.lineCap = "round";
     ctx.strokeStyle = "#0f172a";
-
     ctx.lineTo(clientX - rect.left, clientY - rect.top);
     ctx.stroke();
     setHasSig(true);
@@ -120,61 +135,50 @@ export default function ContractPreviewModal({
     window.print();
   };
 
-  // Speichern in Datenbank & Dokumenten-Ablage
+  // Speichern in Datenbank & Dokumente
   const handleSaveContract = async () => {
     setSaving(true);
-
     try {
-      const sigTenantData = hasTenantSig && canvasMieterRef.current
-        ? canvasMieterRef.current.toDataURL("image/png")
-        : null;
+      const sigTenantData = hasTenantSig && canvasMieterRef.current ? canvasMieterRef.current.toDataURL("image/png") : null;
 
-      const sigLandlordData = hasLandlordSig && canvasVermieterRef.current
-        ? canvasVermieterRef.current.toDataURL("image/png")
-        : null;
-
-      // 1. Vertrag in `contracts` speichern (ohne fehlerhafte Spalten wie template_id)
-      const { data: insertedContract, error: contractErr } = await supabase
-        .from("contracts")
-        .insert([
-          {
-            tenant_id: data.tenantId || null,
-            tenant_name: data.mieterName || "Mieter",
-            unit_id: data.unitId || null,
-            property_id: data.propertyId || null,
-            property_address: data.objektName || "Objekt",
-            start_date: data.mietbeginn || new Date().toISOString().split("T")[0],
-            cold_rent: kalt,
-            utility_costs: nk,
-            deposit: kaution,
-            signature_data: sigTenantData,
-            status: hasTenantSig || hasLandlordSig ? "Unterschrieben" : "Entwurf",
-          },
-        ])
-        .select()
-        .single();
+      // 1. In contracts speichern
+      const { error: contractErr } = await supabase.from("contracts").insert([
+        {
+          tenant_id: data.tenantId || null,
+          tenant_name: mieter,
+          unit_id: data.unitId || null,
+          property_id: data.propertyId || null,
+          property_address: objekt,
+          start_date: mietbeginn,
+          cold_rent: kaltNum,
+          utility_costs: nkNum,
+          deposit: kautionNum,
+          signature_data: sigTenantData,
+          status: hasTenantSig || hasLandlordSig ? "Unterschrieben" : "Entwurf",
+        },
+      ]);
 
       if (contractErr) throw contractErr;
 
-      // 2. Dokument als sichtbares Dokument unter "Dokumente" ablegen
+      // 2. Als Dokument unter "Vertragsmuster" oder ausgefüllte Mietverträge in documents ablegen
       const fullDocumentText = `
-WOHNRAUM-MIETVERTRAG (STANDARD 2026)
+WOHNRAUM-MIETVERTRAG
 
-VERMIETER: ${data.vermieterName || "Vermieter"}
-MIETER: ${data.mieterName || "Mieter"}
+VERMIETER: ${vermieter} (${vermieterAdr})
+MIETER: ${mieter}
 
 § 1 Mietgegenstand & Objekt
-Mietobjekt: ${data.objektName || "Unbekannt"}, Einheit ${data.einheitNr || "1"}.
-Der Vermieter vermietet dem Mieter die oben genannte Wohneinheit ausschließlich zu Wohnzwecken.
+Mietobjekt: ${objekt}, Einheit ${einheit}.
+Der Vermieter vermietet dem Mieter die Wohneinheit ausschließlich zu Wohnzwecken.
 
 § 2 Mietbeginn & Dauer
-Mietbeginn: ${data.mietbeginn || "Sofort"}. Das Mietverhältnis wird auf unbestimmte Zeit geschlossen.
+Mietbeginn: ${mietbeginn}. Das Mietverhältnis läuft auf unbestimmte Zeit.
 
 § 3 Miete & Nebenkosten
-Kaltmiete: ${kalt.toFixed(2)} € | NK-Vorschuss: ${nk.toFixed(2)} € | Gesamt: ${gesamt.toFixed(2)} €
+Kaltmiete: ${kaltNum.toFixed(2)} € | NK-Vorschuss: ${nkNum.toFixed(2)} € | Gesamt: ${gesamtNum.toFixed(2)} €
 
 § 4 Mietkaution
-Die Kautionshöhe beträgt ${kaution.toFixed(2)} €.
+Die Kautionshöhe beträgt ${kautionNum.toFixed(2)} €.
 
 § 5 Sondervereinbarungen
 ${customNotes}
@@ -182,8 +186,8 @@ ${customNotes}
 
       await supabase.from("documents").insert([
         {
-          title: `Mietvertrag: ${data.mieterName || "Mieter"}`,
-          category: "Mietverträge",
+          title: `Mietvertrag: ${mieter}`,
+          category: "Ausgefüllte Verträge",
           content: fullDocumentText,
           property_id: data.propertyId || null,
           tenant_id: data.tenantId || null,
@@ -207,111 +211,165 @@ ${customNotes}
     <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs z-50 flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
       <div className="bg-slate-100 rounded-2xl shadow-2xl max-w-4xl w-full my-auto overflow-hidden border border-slate-300 flex flex-col max-h-[95vh]">
         
-        {/* Header Bar */}
+        {/* Header */}
         <div className="bg-white px-6 py-4 border-b border-slate-200 flex justify-between items-center shrink-0">
           <div className="flex items-center gap-2">
             <span className="text-xl">📄</span>
-            <h3 className="font-bold text-slate-800 text-lg">
-              Mietvertrag: {data.mieterName || "Entwurf"}
-            </h3>
+            <div>
+              <h3 className="font-bold text-slate-800 text-lg">Vertragsvorschau & Bearbeitung</h3>
+              <p className="text-xs text-slate-500">Passe die Felder direkt im Dokument an, bevor du unterschreibst.</p>
+            </div>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={handlePrint}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg text-sm flex items-center gap-2 shadow-sm transition"
-            >
+            <button onClick={handlePrint} type="button" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg text-sm flex items-center gap-2 shadow-sm transition">
               <span>🖨️</span> Drucken / PDF
             </button>
-            <button
-              onClick={onClose}
-              className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-medium rounded-lg text-sm transition"
-            >
+            <button onClick={onClose} type="button" className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-medium rounded-lg text-sm transition">
               Schließen
             </button>
           </div>
         </div>
 
-        {/* Paper Document Container */}
+        {/* Dokument-Ansicht */}
         <div className="p-6 overflow-y-auto flex-1 space-y-6">
           <div className="bg-white rounded-xl shadow-md p-8 max-w-3xl mx-auto border border-slate-200 text-slate-800 font-sans space-y-6">
             
-            {/* Title */}
+            {/* Titel */}
             <div className="text-center pb-4 border-b border-slate-300">
               <h1 className="text-xl font-extrabold tracking-wide text-slate-900 uppercase">
-                Wohnraum-Mietvertrag (Standard 2026)
+                WOHNRAUM-MIETVERTRAG (STANDARD 2026)
               </h1>
-              <p className="text-xs text-slate-500 mt-1">Rechtsgültige Vertragsvorlage</p>
+              <p className="text-xs text-emerald-600 font-semibold mt-1">✨ Alle Felder im Vertrag sind direkt bearbeitbar</p>
             </div>
 
-            {/* Vermieter / Mieter Box */}
+            {/* Vermieter & Mieter (EDITIERBAR) */}
             <div className="bg-slate-50 rounded-lg p-4 border border-slate-200 grid grid-cols-2 gap-4 text-sm">
               <div>
                 <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">VERMIETER</span>
-                <p className="font-semibold text-slate-900">{data.vermieterName || "—"}</p>
-                {data.vermieterAdresse && <p className="text-xs text-slate-600 mt-0.5">{data.vermieterAdresse}</p>}
+                <input
+                  type="text"
+                  value={vermieter}
+                  onChange={(e) => setVermieter(e.target.value)}
+                  className="w-full font-semibold text-slate-900 bg-white border border-slate-300 rounded px-2 py-1 mb-1 text-xs"
+                />
+                <input
+                  type="text"
+                  value={vermieterAdr}
+                  onChange={(e) => setVermieterAdr(e.target.value)}
+                  className="w-full text-xs text-slate-600 bg-white border border-slate-300 rounded px-2 py-1"
+                />
               </div>
               <div>
                 <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">MIETER</span>
-                <p className="font-semibold text-slate-900">{data.mieterName || "—"}</p>
-                {data.mieterAdresse && <p className="text-xs text-slate-600 mt-0.5">{data.mieterAdresse}</p>}
+                <input
+                  type="text"
+                  value={mieter}
+                  onChange={(e) => setMieter(e.target.value)}
+                  className="w-full font-semibold text-slate-900 bg-white border border-slate-300 rounded px-2 py-1 text-xs"
+                  placeholder="Mieter Name"
+                />
               </div>
             </div>
 
-            {/* § 1 Mietgegenstand & Objekt */}
+            {/* § 1 Mietgegenstand & Objekt (EDITIERBAR) */}
             <div className="space-y-1">
               <h2 className="font-bold text-slate-900 border-b border-slate-800 pb-1 text-base">
                 § 1 Mietgegenstand & Objekt
               </h2>
-              <p className="text-sm pt-1">
-                <strong>Mietobjekt:</strong> {data.objektName || "Keine Angabe"}{data.einheitNr ? `, Einheit ${data.einheitNr}` : ""}.
-              </p>
-              <p className="text-xs text-slate-600">
+              <div className="grid grid-cols-2 gap-2 pt-1 text-sm">
+                <div>
+                  <span className="text-xs text-slate-500 block">Objekt / Adresse:</span>
+                  <input
+                    type="text"
+                    value={objekt}
+                    onChange={(e) => setObjekt(e.target.value)}
+                    className="w-full font-semibold text-slate-900 bg-white border border-slate-300 rounded px-2 py-1 text-xs"
+                  />
+                </div>
+                <div>
+                  <span className="text-xs text-slate-500 block">Einheit Nr.:</span>
+                  <input
+                    type="text"
+                    value={einheit}
+                    onChange={(e) => setEinheit(e.target.value)}
+                    className="w-full font-semibold text-slate-900 bg-white border border-slate-300 rounded px-2 py-1 text-xs"
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-slate-600 pt-1">
                 Der Vermieter vermietet dem Mieter die oben genannte Wohneinheit ausschließlich zu Wohnzwecken.
               </p>
             </div>
 
-            {/* § 2 Mietbeginn & Dauer */}
+            {/* § 2 Mietbeginn & Dauer (EDITIERBAR) */}
             <div className="space-y-1">
               <h2 className="font-bold text-slate-900 border-b border-slate-800 pb-1 text-base">
                 § 2 Mietbeginn & Dauer
               </h2>
-              <p className="text-sm pt-1">
-                <strong>Mietbeginn:</strong> {data.mietbeginn || "Nach Vereinbarung"}. Das Mietverhältnis wird auf unbestimmte Zeit geschlossen.
-              </p>
+              <div className="pt-1 flex items-center gap-2">
+                <span className="text-sm font-semibold">Mietbeginn:</span>
+                <input
+                  type="date"
+                  value={mietbeginn}
+                  onChange={(e) => setMietbeginn(e.target.value)}
+                  className="bg-white border border-slate-300 rounded px-2 py-1 text-xs font-medium"
+                />
+              </div>
+              <p className="text-xs text-slate-600">Das Mietverhältnis wird auf unbestimmte Zeit geschlossen.</p>
             </div>
 
-            {/* § 3 Miete & Nebenkosten */}
+            {/* § 3 Miete & Nebenkosten (EDITIERBAR) */}
             <div className="space-y-2">
               <h2 className="font-bold text-slate-900 border-b border-slate-800 pb-1 text-base">
                 § 3 Miete & Nebenkosten
               </h2>
-              <div className="border border-slate-800 rounded-md p-3 grid grid-cols-3 text-center text-sm bg-slate-50 font-medium">
+              <div className="border border-slate-800 rounded-md p-3 grid grid-cols-3 text-center text-sm bg-slate-50 font-medium gap-2">
                 <div>
-                  <span className="text-xs text-slate-500 block">Kaltmiete:</span>
-                  <span className="font-bold text-slate-900">{kalt.toFixed(2)} €</span>
+                  <span className="text-xs text-slate-500 block mb-1">Kaltmiete (€):</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={kaltmiete}
+                    onChange={(e) => setKaltmiete(e.target.value)}
+                    className="w-full text-center font-bold text-slate-900 bg-white border border-slate-300 rounded p-1 text-xs"
+                  />
                 </div>
                 <div>
-                  <span className="text-xs text-slate-500 block">NK-Vorschuss:</span>
-                  <span className="font-bold text-slate-900">{nk.toFixed(2)} €</span>
+                  <span className="text-xs text-slate-500 block mb-1">NK-Vorschuss (€):</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={nebenkosten}
+                    onChange={(e) => setNebenkosten(e.target.value)}
+                    className="w-full text-center font-bold text-slate-900 bg-white border border-slate-300 rounded p-1 text-xs"
+                  />
                 </div>
                 <div>
-                  <span className="text-xs text-slate-500 block">Gesamt:</span>
-                  <span className="font-extrabold text-slate-900">{gesamt.toFixed(2)} €</span>
+                  <span className="text-xs text-slate-500 block mb-1">Gesamt:</span>
+                  <span className="font-extrabold text-slate-900 block py-1">{gesamtNum.toFixed(2)} €</span>
                 </div>
               </div>
             </div>
 
-            {/* § 4 Mietkaution */}
+            {/* § 4 Mietkaution (EDITIERBAR) */}
             <div className="space-y-1">
               <h2 className="font-bold text-slate-900 border-b border-slate-800 pb-1 text-base">
                 § 4 Mietkaution
               </h2>
-              <p className="text-sm pt-1">
-                Die Kautionshöhe beträgt <strong>{kaution.toFixed(2)} €</strong>.
-              </p>
+              <div className="pt-1 flex items-center gap-2">
+                <span className="text-sm">Die Kautionshöhe beträgt:</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={kaution}
+                  onChange={(e) => setKaution(e.target.value)}
+                  className="w-32 bg-white border border-slate-300 rounded px-2 py-1 text-xs font-bold"
+                />
+                <span className="text-sm font-bold">€</span>
+              </div>
             </div>
 
-            {/* § 5 Sondervereinbarungen (BEARBEITBAR) */}
+            {/* § 5 Sondervereinbarungen (EDITIERBAR) */}
             <div className="space-y-2">
               <h2 className="font-bold text-slate-900 border-b border-slate-800 pb-1 text-base">
                 § 5 Sondervereinbarungen
@@ -321,7 +379,6 @@ ${customNotes}
                 onChange={(e) => setCustomNotes(e.target.value)}
                 rows={3}
                 className="w-full p-3 bg-amber-50/60 border border-amber-200 rounded-lg text-sm italic font-serif text-slate-800 outline-none focus:ring-2 focus:ring-amber-400"
-                placeholder="Hier individuelle Ergänzungen oder Freitexte eingeben..."
               />
             </div>
 
@@ -331,20 +388,13 @@ ${customNotes}
               <div>Datum: <strong>{formattedDate}</strong></div>
             </div>
 
-            {/* Unterschriften-Bereich */}
+            {/* Unterschriften */}
             <div className="pt-6 grid grid-cols-2 gap-6 border-t border-slate-200">
-              
-              {/* Unterschrift Mieter */}
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
                   <label className="text-xs font-bold text-slate-700">Unterschrift Mieter</label>
                   {hasTenantSig && (
-                    <button
-                      onClick={() => clearCanvas(canvasMieterRef.current, setHasTenantSig)}
-                      className="text-[10px] text-red-500 hover:underline"
-                    >
-                      Löschen
-                    </button>
+                    <button type="button" onClick={() => clearCanvas(canvasMieterRef.current, setHasTenantSig)} className="text-[10px] text-red-500 hover:underline">Löschen</button>
                   )}
                 </div>
                 <div className="border border-slate-300 rounded-lg bg-slate-50 overflow-hidden h-24 relative">
@@ -362,25 +412,17 @@ ${customNotes}
                     className="w-full h-full cursor-crosshair bg-white"
                   />
                   {!hasTenantSig && (
-                    <span className="absolute inset-0 flex items-center justify-center text-xs text-slate-400 italic pointer-events-none">
-                      Unterschrift Mieter ausstehend
-                    </span>
+                    <span className="absolute inset-0 flex items-center justify-center text-xs text-slate-400 italic pointer-events-none">Unterschrift Mieter ausstehend</span>
                   )}
                 </div>
                 <p className="text-center font-bold text-xs text-slate-800 pt-1">Unterschrift Mieter</p>
               </div>
 
-              {/* Unterschrift Vermieter */}
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
                   <label className="text-xs font-bold text-slate-700">Unterschrift Vermieter</label>
                   {hasLandlordSig && (
-                    <button
-                      onClick={() => clearCanvas(canvasVermieterRef.current, setHasLandlordSig)}
-                      className="text-[10px] text-red-500 hover:underline"
-                    >
-                      Löschen
-                    </button>
+                    <button type="button" onClick={() => clearCanvas(canvasVermieterRef.current, setHasLandlordSig)} className="text-[10px] text-red-500 hover:underline">Löschen</button>
                   )}
                 </div>
                 <div className="border border-slate-300 rounded-lg bg-slate-50 overflow-hidden h-24 relative">
@@ -398,36 +440,26 @@ ${customNotes}
                     className="w-full h-full cursor-crosshair bg-white"
                   />
                   {!hasLandlordSig && (
-                    <span className="absolute inset-0 flex items-center justify-center text-xs text-slate-400 italic pointer-events-none">
-                      Unterschrift Vermieter ausstehend
-                    </span>
+                    <span className="absolute inset-0 flex items-center justify-center text-xs text-slate-400 italic pointer-events-none">Unterschrift Vermieter ausstehend</span>
                   )}
                 </div>
                 <p className="text-center font-bold text-xs text-slate-800 pt-1">Unterschrift Vermieter</p>
               </div>
-
             </div>
 
           </div>
         </div>
 
-        {/* Footer Actions */}
+        {/* Footer */}
         <div className="bg-white px-6 py-4 border-t border-slate-200 flex justify-between items-center shrink-0">
           <p className="text-xs text-slate-500">
-            Speichert den Vertrag in der Datenbank und legt ihn unter <strong>Dokumente</strong> ab.
+            Nach Klick wird der Vertrag fest abgespeichert und unter <strong>Dokumente</strong> hinterlegt.
           </p>
           <div className="flex items-center gap-3">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-sm"
-            >
+            <button onClick={onClose} type="button" className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-sm">
               Abbrechen
             </button>
-            <button
-              onClick={handleSaveContract}
-              disabled={saving}
-              className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-sm shadow-md transition disabled:opacity-50"
-            >
+            <button onClick={handleSaveContract} disabled={saving} type="button" className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-sm shadow-md transition disabled:opacity-50">
               {saving ? "Speichere..." : "Vertrag Speichern & Ablegen ✓"}
             </button>
           </div>

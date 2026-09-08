@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect } from "react";
 import { Property, Unit, Tenant } from "@/types";
-import ContractPreviewModal, { ContractPreviewData } from "./ContractPreviewModal";
+import { supabase } from "@/lib/supabase";
+import ContractPreviewModal, { ContractPreviewData } from "../ContractPreviewModal";
 
 interface Props {
   isOpen: boolean;
@@ -25,7 +26,9 @@ export default function AddContractModal({
   const [selectedUnitId, setSelectedUnitId] = useState("");
   const [selectedTenantId, setSelectedTenantId] = useState("");
 
-  const [templateName, setTemplateName] = useState("Standard-Wohnraummietvertrag 2026");
+  const [contractTemplates, setContractTemplates] = useState<any[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
+
   const [startDate, setStartDate] = useState(new Date().toISOString().split("T")[0]);
   const [noticePeriodMonths, setNoticePeriodMonths] = useState(3);
 
@@ -36,6 +39,7 @@ export default function AddContractModal({
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [previewData, setPreviewData] = useState<ContractPreviewData | null>(null);
 
+  // Vertragsmuster aus Supabase (Kategorie: "Vertragsmuster") laden beim Öffnen
   useEffect(() => {
     if (isOpen) {
       setSelectedPropertyId("");
@@ -45,8 +49,27 @@ export default function AddContractModal({
       setUtilityCosts("200");
       setDeposit("2400");
       setStartDate(new Date().toISOString().split("T")[0]);
+
+      fetchTemplates();
     }
   }, [isOpen]);
+
+  const fetchTemplates = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("documents")
+        .select("id, title, content, category")
+        .eq("category", "Vertragsmuster");
+
+      if (error) throw error;
+      setContractTemplates(data || []);
+      if (data && data.length > 0) {
+        setSelectedTemplateId(data[0].id);
+      }
+    } catch (err) {
+      console.error("Fehler beim Laden der Vertragsmuster:", err);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -58,7 +81,6 @@ export default function AddContractModal({
     (t) => !selectedUnitId || String(t.unit_id) === String(selectedUnitId)
   );
 
-  // Einheit auswählen -> automatische Zuordnung
   const handleUnitChange = (unitId: string) => {
     setSelectedUnitId(unitId);
     const unit = units.find((u) => String(u.id) === String(unitId));
@@ -69,7 +91,6 @@ export default function AddContractModal({
     }
   };
 
-  // Mieter auswählen
   const handleTenantChange = (tenantId: string) => {
     setSelectedTenantId(tenantId);
     const tenant = tenants.find((t) => String(t.id) === String(tenantId));
@@ -80,24 +101,17 @@ export default function AddContractModal({
     }
   };
 
-  // Vorschau öffnen und Daten sauber aufbereiten
   const handleOpenPreview = (e: React.FormEvent) => {
     e.preventDefault();
 
     const prop = properties.find((p) => String(p.id) === String(selectedPropertyId));
     const unit = units.find((u) => String(u.id) === String(selectedUnitId));
     const tenant = tenants.find((t) => String(t.id) === String(selectedTenantId));
+    const template = contractTemplates.find((t) => String(t.id) === String(selectedTemplateId));
 
-    const tenantName = tenant
-      ? `${tenant.first_name || ""} ${tenant.last_name || ""}`.trim()
-      : "Test Dummy";
-
-    const propName = prop ? prop.name || prop.address || "Wohnung Koblenz" : "Wohnung Koblenz";
-    const unitNumber = unit ? String(unit.unit_number || unit.id || "Einheit 2") : "Einheit 2";
-
-    const numCold = parseFloat(coldRent) || 0;
-    const numUtil = parseFloat(utilityCosts) || 0;
-    const numDep = parseFloat(deposit) || 0;
+    const tenantName = tenant ? `${tenant.first_name || ""} ${tenant.last_name || ""}`.trim() : "Muster-Mieter";
+    const propName = prop ? prop.name || prop.address || "Objekt Koblenz" : "Objekt Koblenz";
+    const unitNumber = unit ? String(unit.unit_number || "1") : "1";
 
     const dataPayload: ContractPreviewData = {
       vermieterName: "Hausverwaltung / Vermieter",
@@ -105,11 +119,11 @@ export default function AddContractModal({
       mieterName: tenantName,
       objektName: propName,
       einheitNr: unitNumber,
-      mietbeginn: startDate ? new Date(startDate).toLocaleDateString("de-DE") : "08.09.2026",
-      kaltmiete: numCold,
-      nebenkosten: numUtil,
-      kaution: numDep,
-      sondervereinbarungen: "Keine besonderen Vereinbarungen.",
+      mietbeginn: startDate,
+      kaltmiete: parseFloat(coldRent) || 0,
+      nebenkosten: parseFloat(utilityCosts) || 0,
+      kaution: parseFloat(deposit) || 0,
+      sondervereinbarungen: template ? template.content : "Keine besonderen Vereinbarungen.",
       propertyId: selectedPropertyId,
       unitId: selectedUnitId,
       tenantId: selectedTenantId,
@@ -130,7 +144,7 @@ export default function AddContractModal({
                 <span>📄</span> Neuen Mietvertrag erstellen
               </h3>
               <p className="text-slate-500 text-xs">
-                Erfasse die Vertragsdaten & wähle ein Vertragsmuster aus Dokumente.
+                Wähle ein Vertragsmuster aus dem Ordner &quot;Vertragsmuster&quot; und verknüpfe es mit dem Mieter.
               </p>
             </div>
             <button onClick={onClose} type="button" className="text-slate-400 hover:text-slate-600 text-lg">✕</button>
@@ -138,17 +152,22 @@ export default function AddContractModal({
 
           <form onSubmit={handleOpenPreview} className="space-y-4 text-xs">
             
-            {/* Vorlagen Auswahl */}
+            {/* Vorlage aus Dokumente -> Vertragsmuster */}
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Vertragsmuster / Vorlage (aus Dokumente)</label>
+              <label className="block font-semibold text-slate-700 mb-1">Vertragsmuster (aus Dokumente ➔ Vertragsmuster)</label>
               <select
-                value={templateName}
-                onChange={(e) => setTemplateName(e.target.value)}
+                value={selectedTemplateId}
+                onChange={(e) => setSelectedTemplateId(e.target.value)}
                 className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 bg-white font-medium"
+                required
               >
-                <option value="Standard-Wohnraummietvertrag 2026">Standard-Wohnraummietvertrag 2026</option>
-                <option value="Mietvertrag Staffelmiete 2026">Mietvertrag Staffelmiete 2026</option>
-                <option value="Gewerbemietvertrag Muster">Gewerbemietvertrag Muster</option>
+                {contractTemplates.length === 0 ? (
+                  <option value="">Keine Muster gefunden (Kategorie: Vertragsmuster)</option>
+                ) : (
+                  contractTemplates.map((t) => (
+                    <option key={t.id} value={t.id}>{t.title}</option>
+                  ))
+                )}
               </select>
             </div>
 
@@ -228,14 +247,13 @@ export default function AddContractModal({
               </div>
             </div>
 
-            {/* Finanzielle Angaben */}
+            {/* Beträge */}
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">Kaltmiete (€)</label>
                 <input
                   type="number"
                   step="0.01"
-                  placeholder="800"
                   value={coldRent}
                   onChange={(e) => setColdRent(e.target.value)}
                   className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
@@ -246,7 +264,6 @@ export default function AddContractModal({
                 <input
                   type="number"
                   step="0.01"
-                  placeholder="200"
                   value={utilityCosts}
                   onChange={(e) => setUtilityCosts(e.target.value)}
                   className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
@@ -257,7 +274,6 @@ export default function AddContractModal({
                 <input
                   type="number"
                   step="0.01"
-                  placeholder="2400"
                   value={deposit}
                   onChange={(e) => setDeposit(e.target.value)}
                   className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
@@ -266,25 +282,17 @@ export default function AddContractModal({
             </div>
 
             <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg"
-              >
+              <button type="button" onClick={onClose} className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg">
                 Abbrechen
               </button>
-              <button
-                type="submit"
-                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg shadow-sm"
-              >
-                Vertrag erstellen & Vorschau ➔
+              <button type="submit" className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg shadow-sm">
+                Vertrag öffnen & bearbeiten ➔
               </button>
             </div>
           </form>
         </div>
       </div>
 
-      {/* Vorschau Modal mit allen Daten & Unterschriften */}
       {previewData && (
         <ContractPreviewModal
           isOpen={isPreviewOpen}
