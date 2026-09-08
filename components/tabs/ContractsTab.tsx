@@ -45,11 +45,11 @@ export function ContractsTab({ properties = [], units = [], tenants = [], onRefr
   const [selectedTenantId, setSelectedTenantId] = useState("");
   const [landlordName, setLandlordName] = useState("Tobias Schneider");
   const [startDate, setStartDate] = useState(new Date().toISOString().split("T")[0]);
-  const [coldRent, setColdRent] = useState<number>(1000);
+  const [coldRent, setColdRent] = useState<number>(500);
   const [utilityAdvance, setUtilityAdvance] = useState<number>(300);
-  const [deposit, setDeposit] = useState<number>(3000);
+  const [deposit, setDeposit] = useState<number>(1500);
   const [specialTerms, setSpecialTerms] = useState("Keine besonderen Vereinbarungen.");
-  const [signingPlace, setSigningPlace] = useState("Frankfurt am Main");
+  const [signingPlace, setSigningPlace] = useState("");
 
   // Bearbeitbare Vertragstexte
   const [paragraph1, setParagraph1] = useState("Der Vermieter vermietet dem Mieter die oben genannte Wohneinheit ausschließlich zu Wohnzwecken.");
@@ -85,10 +85,11 @@ export function ContractsTab({ properties = [], units = [], tenants = [], onRefr
     setSelectedTenantId("");
     setLandlordName("Tobias Schneider");
     setStartDate(new Date().toISOString().split("T")[0]);
-    setColdRent(1000);
+    setColdRent(500);
     setUtilityAdvance(300);
-    setDeposit(3000);
+    setDeposit(1500);
     setSpecialTerms("Keine besonderen Vereinbarungen.");
+    setSigningPlace("");
     setParagraph1("Der Vermieter vermietet dem Mieter die oben genannte Wohneinheit ausschließlich zu Wohnzwecken.");
     setParagraph2("Das Mietverhältnis beginnt am oben genannten Datum und wird auf unbestimmte Zeit geschlossen.");
     setTenantSig(null);
@@ -102,32 +103,39 @@ export function ContractsTab({ properties = [], units = [], tenants = [], onRefr
     if (!tenant) return;
 
     const unit = units.find((u) => String(u.id) === String(tenant.unit_id));
+    const property = properties.find((p) => String(p.id) === String(unit?.property_id));
 
     const t = tenant as any;
     const u = (unit || {}) as any;
 
+    // Miete & Nebenkosten aus Mieter oder Einheit auslesen
     const utility = Number(
       t.utility_advance ?? t.utility_costs ?? t.nebenkosten ?? u.utility_advance ?? 300
     );
 
     let cold = Number(
-      t.base_rent ?? t.rent_cold ?? t.cold_rent ?? t.kaltmiete ?? t.net_rent ??
-      u.rent_cold ?? u.cold_rent ?? u.base_rent ?? u.kaltmiete ?? u.rent ?? 0
+      t.base_rent ?? t.rent_cold ?? t.cold_rent ?? t.kaltmiete ?? t.net_rent ?? t.rent ??
+      u.rent_cold ?? u.cold_rent ?? u.base_rent ?? u.kaltmiete ?? u.rent ?? 500
     );
 
-    if (cold === 0) {
-      const totalRent = Number(t.warm_rent ?? t.total_rent ?? t.rent ?? u.warm_rent ?? 0);
-      if (totalRent > utility) cold = totalRent - utility;
-    }
-
-    const finalCold = cold > 0 ? cold : 1000;
-
-    setColdRent(finalCold);
+    setColdRent(cold);
     setUtilityAdvance(utility);
-    setDeposit(finalCold * 3);
+    setDeposit(cold * 3);
+
+    // Ort automatisch aus Objektadresse ermitteln
+    if (property?.address) {
+      const parts = property.address.split(",");
+      if (parts.length > 1) {
+        setSigningPlace(parts[parts.length - 1].trim().replace(/^\d+\s*/, ""));
+      } else {
+        setSigningPlace(property.address);
+      }
+    } else {
+      setSigningPlace("");
+    }
   };
 
-  // 精准 Signature Canvas Helpers mit Skalierung (Kein XXL / Blur mehr)
+  // Signature Canvas Helpers
   const getCanvasCoords = (e: any, canvas: HTMLCanvasElement) => {
     const rect = canvas.getBoundingClientRect();
     const touch = e.touches && e.touches.length > 0 ? e.touches[0] : null;
@@ -183,21 +191,27 @@ export function ContractsTab({ properties = [], units = [], tenants = [], onRefr
     setSig(null);
   };
 
-  // Speichern mit genauer Fehlerbehandlung
+  // Objekt- und Mieter-Details für die Erstellung ermitteln
+  const selectedTenantObj = tenants.find((t) => String(t.id) === String(selectedTenantId));
+  const selectedUnitObj = units.find((u) => String(u.id) === String(selectedTenantObj?.unit_id));
+  const selectedPropertyObj = properties.find((p) => String(p.id) === String(selectedUnitObj?.property_id));
+
+  const currentTenantName = selectedTenantObj ? `${selectedTenantObj.first_name} ${selectedTenantObj.last_name}` : "Kein Mieter gewählt";
+  const currentAddress = selectedPropertyObj?.address || "Keine Adresse angegeben";
+  const currentUnit = selectedUnitObj?.unit_number ? `Einheit ${selectedUnitObj.unit_number}` : "Wohneinheit";
+
+  // Speichern in Supabase
   const handleFinalizeContract = async () => {
     setIsSaving(true);
     try {
-      const tenant = tenants.find((t) => String(t.id) === String(selectedTenantId));
-      const unit = units.find((u) => String(u.id) === String(tenant?.unit_id));
-      const property = properties.find((p) => String(p.id) === String(unit?.property_id));
       const timestamp = new Date().toLocaleString("de-DE", { dateStyle: "medium", timeStyle: "short" });
 
       const newContractPayload = {
         tenant_id: selectedTenantId || null,
-        tenant_name: tenant ? `${tenant.first_name} ${tenant.last_name}` : "Emre Mercan",
+        tenant_name: currentTenantName,
         landlord_name: landlordName,
-        property_address: property?.address || "Mainzer Str. 36",
-        unit_name: unit?.unit_number ? `Einheit ${unit.unit_number}` : "WE 1 - UG links",
+        property_address: currentAddress,
+        unit_name: currentUnit,
         start_date: startDate,
         cold_rent: Number(coldRent),
         utility_advance: Number(utilityAdvance),
@@ -206,7 +220,7 @@ export function ContractsTab({ properties = [], units = [], tenants = [], onRefr
         status: tenantSig && landlordSig ? "signed" : "draft",
         tenant_signature: tenantSig || null,
         landlord_signature: landlordSig || null,
-        signing_place: signingPlace,
+        signing_place: signingPlace || "Ort nicht angegeben",
         signing_timestamp: timestamp,
       };
 
@@ -214,14 +228,9 @@ export function ContractsTab({ properties = [], units = [], tenants = [], onRefr
 
       if (error) {
         console.error("Supabase Error Details:", error);
-        alert(`Fehler beim Speichern in Supabase:\n${error.message}\n\nHinweis: Bitte führe das bereitgestellte SQL-Skript im Supabase SQL Editor aus.`);
+        alert(`Fehler beim Speichern in Supabase:\n${error.message}`);
       } else {
-        alert(" Vertrages erfolgreich gespeichert und versiegelt!");
-        
-        if (selectedTenantId) {
-          await supabase.from("tenants").update({ utility_advance: utilityAdvance, rent: coldRent }).eq("id", selectedTenantId);
-        }
-
+        alert("Vertrag erfolgreich gespeichert!");
         if (onRefresh) onRefresh();
         await fetchContracts();
         setView("folder");
@@ -235,24 +244,28 @@ export function ContractsTab({ properties = [], units = [], tenants = [], onRefr
     }
   };
 
-  const selectedTenantObj = tenants.find((t) => String(t.id) === String(selectedTenantId));
-  const selectedUnitObj = units.find((u) => String(u.id) === String(selectedTenantObj?.unit_id));
-  const selectedPropertyObj = properties.find((p) => String(p.id) === String(selectedUnitObj?.property_id));
-
-  const currentTenantName = selectedTenantObj ? `${selectedTenantObj.first_name} ${selectedTenantObj.last_name}` : "Emre Mercan";
-  const currentAddress = selectedPropertyObj?.address || "Mainzer Str. 36";
-  const currentUnit = selectedUnitObj?.unit_number ? `Einheit ${selectedUnitObj.unit_number}` : "WE 1 - UG links";
-
-  // Vorschau & bearbeitbares Dokument
-  const renderContractDocument = (editable = true, customSigTenant?: string | null, customSigLandlord?: string | null) => {
-    const tSig = customSigTenant !== undefined ? customSigTenant : tenantSig;
-    const lSig = customSigLandlord !== undefined ? customSigLandlord : landlordSig;
+  // Dokumenten-Renderer (Unterstützt gespeicherte Verträge & den aktuellen Entwurf)
+  const renderContractDocument = (docData?: Contract | null, editable: boolean = false) => {
+    const data = docData || {
+      landlord_name: landlordName,
+      tenant_name: currentTenantName,
+      property_address: currentAddress,
+      unit_name: currentUnit,
+      start_date: startDate,
+      cold_rent: coldRent,
+      utility_advance: utilityAdvance,
+      deposit: deposit,
+      special_terms: specialTerms,
+      signing_place: signingPlace,
+      tenant_signature: tenantSig,
+      landlord_signature: landlordSig,
+    };
 
     return (
       <div className="bg-white p-8 rounded-lg shadow-md border border-slate-300 font-serif text-slate-800 text-xs leading-relaxed space-y-4 max-w-2xl mx-auto relative">
         {editable && (
           <div className="no-print bg-amber-50 border border-amber-200 text-amber-800 p-2 rounded text-[11px] font-sans flex items-center justify-between mb-2">
-            <span>✏️ <strong>Tipp:</strong> Klicke direkt in die Textfelder, um den Inhalt anzupassen.</span>
+            <span>✏️ <strong>Tipp:</strong> Klicke direkt in die Felder, um Text anzupassen.</span>
           </div>
         )}
 
@@ -273,12 +286,12 @@ export function ContractsTab({ properties = [], units = [], tenants = [], onRefr
                 className="font-semibold text-slate-900 border-b border-dashed border-slate-400 bg-transparent w-full focus:outline-none"
               />
             ) : (
-              <p className="font-semibold text-slate-900">{landlordName}</p>
+              <p className="font-semibold text-slate-900">{data.landlord_name}</p>
             )}
           </div>
           <div>
             <span className="font-bold text-slate-500 uppercase block text-[9px]">Mieter</span>
-            <p className="font-semibold text-slate-900">{currentTenantName}</p>
+            <p className="font-semibold text-slate-900">{data.tenant_name}</p>
           </div>
         </div>
 
@@ -287,7 +300,7 @@ export function ContractsTab({ properties = [], units = [], tenants = [], onRefr
           <div>
             <h4 className="font-bold font-sans text-slate-900 text-xs border-b pb-0.5 mb-1">§ 1 Mietgegenstand & Objekt</h4>
             <p className="mb-1">
-              Mietobjekt: <strong>{currentAddress}</strong> ({currentUnit}).
+              Mietobjekt: <strong>{data.property_address}</strong> ({data.unit_name}).
             </p>
             {editable ? (
               <textarea
@@ -304,7 +317,7 @@ export function ContractsTab({ properties = [], units = [], tenants = [], onRefr
           <div>
             <h4 className="font-bold font-sans text-slate-900 text-xs border-b pb-0.5 mb-1">§ 2 Mietbeginn & Dauer</h4>
             <p className="mb-1">
-              Mietbeginn: <strong>{startDate}</strong>
+              Mietbeginn: <strong>{data.start_date}</strong>
             </p>
             {editable ? (
               <textarea
@@ -321,15 +334,15 @@ export function ContractsTab({ properties = [], units = [], tenants = [], onRefr
           <div>
             <h4 className="font-bold font-sans text-slate-900 text-xs border-b pb-0.5 mb-1">§ 3 Miete & Nebenkosten</h4>
             <div className="my-1 font-sans text-[11px] grid grid-cols-3 gap-2 bg-slate-50 p-2 rounded border">
-              <div>Kaltmiete: <strong>{coldRent} €</strong></div>
-              <div>NK-Vorschuss: <strong>{utilityAdvance} €</strong></div>
-              <div className="font-bold text-slate-900">Gesamt: <strong>{coldRent + utilityAdvance} €</strong></div>
+              <div>Kaltmiete: <strong>{data.cold_rent} €</strong></div>
+              <div>NK-Vorschuss: <strong>{data.utility_advance} €</strong></div>
+              <div className="font-bold text-slate-900">Gesamt: <strong>{Number(data.cold_rent) + Number(data.utility_advance)} €</strong></div>
             </div>
           </div>
 
           <div>
             <h4 className="font-bold font-sans text-slate-900 text-xs border-b pb-0.5 mb-1">§ 4 Mietkaution</h4>
-            <p>Die Kautionshöhe beträgt <strong>{deposit} €</strong>.</p>
+            <p>Die Kautionshöhe beträgt <strong>{data.deposit} €</strong>.</p>
           </div>
 
           <div>
@@ -343,7 +356,7 @@ export function ContractsTab({ properties = [], units = [], tenants = [], onRefr
                 placeholder="Hier Zusatzvereinbarungen eintragen..."
               />
             ) : (
-              <p className="italic bg-amber-50/60 p-2 rounded border border-amber-100">{specialTerms}</p>
+              <p className="italic bg-amber-50/60 p-2 rounded border border-amber-100">{data.special_terms || "Keine besonderen Vereinbarungen."}</p>
             )}
           </div>
         </div>
@@ -351,29 +364,29 @@ export function ContractsTab({ properties = [], units = [], tenants = [], onRefr
         {/* Unterschriftenzeile */}
         <div className="pt-4 border-t border-slate-300 font-sans space-y-3">
           <div className="text-[10px] text-slate-500 flex justify-between">
-            <span>Ort: <strong>{signingPlace}</strong></span>
+            <span>Ort: <strong>{data.signing_place || "__________________"}</strong></span>
             <span>Datum: <strong>{new Date().toLocaleDateString("de-DE")}</strong></span>
           </div>
 
           <div className="grid grid-cols-2 gap-6 pt-2">
             <div className="border-t border-slate-400 pt-1 text-center">
-              {tSig ? (
-                <img src={tSig} alt="Unterschrift Mieter" className="h-10 mx-auto object-contain mb-1" />
+              {data.tenant_signature ? (
+                <img src={data.tenant_signature} alt="Unterschrift Mieter" className="h-10 mx-auto object-contain mb-1" />
               ) : (
                 <div className="h-10 flex items-center justify-center text-slate-300 italic text-[10px]">Unterschrift Mieter ausstehend</div>
               )}
               <p className="font-bold text-[11px] text-slate-800">Unterschrift Mieter</p>
-              <p className="text-[9px] text-slate-500">{currentTenantName}</p>
+              <p className="text-[9px] text-slate-500">{data.tenant_name}</p>
             </div>
 
             <div className="border-t border-slate-400 pt-1 text-center">
-              {lSig ? (
-                <img src={lSig} alt="Unterschrift Vermieter" className="h-10 mx-auto object-contain mb-1" />
+              {data.landlord_signature ? (
+                <img src={data.landlord_signature} alt="Unterschrift Vermieter" className="h-10 mx-auto object-contain mb-1" />
               ) : (
                 <div className="h-10 flex items-center justify-center text-slate-300 italic text-[10px]">Unterschrift Vermieter ausstehend</div>
               )}
               <p className="font-bold text-[11px] text-slate-800">Unterschrift Vermieter</p>
-              <p className="text-[9px] text-slate-500">{landlordName}</p>
+              <p className="text-[9px] text-slate-500">{data.landlord_name}</p>
             </div>
           </div>
         </div>
@@ -415,7 +428,7 @@ export function ContractsTab({ properties = [], units = [], tenants = [], onRefr
             </div>
 
             <div id="printable-document" className="p-6 overflow-y-auto bg-slate-100">
-              {renderContractDocument(false, previewContract.tenant_signature, previewContract.landlord_signature)}
+              {renderContractDocument(previewContract, false)}
             </div>
           </div>
         </div>
@@ -520,8 +533,8 @@ export function ContractsTab({ properties = [], units = [], tenants = [], onRefr
                 <div className="p-4 bg-blue-50/70 rounded-lg border border-blue-200 space-y-1.5 text-slate-700">
                   <div>📍 <strong>Objekt:</strong> {currentAddress}</div>
                   <div>🏢 <strong>Einheit:</strong> {currentUnit}</div>
-                  <div>💶 <strong>Übernommene Kaltmiete:</strong> <span className="font-bold text-blue-700">{coldRent} €</span></div>
-                  <div>⚡ <strong>Übernommene NK:</strong> <span className="font-bold text-blue-700">{utilityAdvance} €</span></div>
+                  <div>💶 <strong>Kaltmiete:</strong> <span className="font-bold text-blue-700">{coldRent} €</span></div>
+                  <div>⚡ <strong>NK-Vorauszahlung:</strong> <span className="font-bold text-blue-700">{utilityAdvance} €</span></div>
                 </div>
               )}
 
@@ -542,7 +555,7 @@ export function ContractsTab({ properties = [], units = [], tenants = [], onRefr
             <div className="space-y-6">
               <div className="text-center max-w-xl mx-auto">
                 <h3 className="font-bold text-slate-900 text-sm">Schritt 2: Vertragsdaten & direkte Bearbeitung</h3>
-                <p className="text-slate-500 text-xs">Du kannst Werte links eingeben ODER den Text rechts direkt im Dokument bearbeiten.</p>
+                <p className="text-slate-500 text-xs">Du kannst Werte links anpassen oder rechts direkt im Dokument bearbeiten.</p>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
@@ -568,6 +581,17 @@ export function ContractsTab({ properties = [], units = [], tenants = [], onRefr
                         className="w-full border p-2 rounded bg-white font-medium"
                       />
                     </div>
+                  </div>
+
+                  <div>
+                    <label className="font-semibold block mb-1">Unterschriftsort (Freitext)</label>
+                    <input
+                      type="text"
+                      placeholder="z. B. Mayen, Frankfurt, Berlin..."
+                      value={signingPlace}
+                      onChange={(e) => setSigningPlace(e.target.value)}
+                      className="w-full border p-2 rounded bg-white font-medium"
+                    />
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
@@ -607,7 +631,7 @@ export function ContractsTab({ properties = [], units = [], tenants = [], onRefr
                 </div>
 
                 <div className="space-y-2">
-                  {renderContractDocument(true)}
+                  {renderContractDocument(null, true)}
                 </div>
               </div>
 
@@ -620,7 +644,7 @@ export function ContractsTab({ properties = [], units = [], tenants = [], onRefr
             </div>
           )}
 
-          {/* Schritt 3: Unterschriften (Jetzt in kompakter, richtiger Größe) */}
+          {/* Schritt 3 */}
           {wizardStep === 3 && (
             <div className="space-y-6">
               <div className="text-center max-w-xl mx-auto space-y-1">
@@ -629,12 +653,12 @@ export function ContractsTab({ properties = [], units = [], tenants = [], onRefr
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
-                {/* Kompakte Unterschriftsfelder */}
                 <div className="space-y-4 bg-slate-50 p-5 rounded-xl border border-slate-200">
                   <div>
-                    <label className="font-semibold block mb-1">Ort der Unterzeichnung</label>
+                    <label className="font-semibold block mb-1">Unterschriftsort</label>
                     <input
                       type="text"
+                      placeholder="Ort eingeben..."
                       value={signingPlace}
                       onChange={(e) => setSigningPlace(e.target.value)}
                       className="w-full border p-2 rounded bg-white font-medium"
@@ -695,7 +719,7 @@ export function ContractsTab({ properties = [], units = [], tenants = [], onRefr
                 </div>
 
                 <div className="space-y-2">
-                  {renderContractDocument(false)}
+                  {renderContractDocument(null, false)}
                 </div>
               </div>
 
