@@ -52,38 +52,44 @@ export default function AddContractModal({
     }
   };
 
-  // Auto-Fill bei Mieter-Auswahl mit Kautionsvorschlag (3x Kaltmiete)
+  // Auto-Fill bei Mieter-Auswahl
   const handleTenantChange = (tenantId: string) => {
     setSelectedTenantId(tenantId);
     const tenant = tenants.find((t) => String(t.id) === String(tenantId));
 
     if (tenant) {
+      // Zugehörige Einheit & Objekt selektieren
       if (tenant.unit_id) {
-        setSelectedUnitId(String(tenant.unit_id));
-        const unit = units.find((u) => String(u.id) === String(tenant.unit_id));
+        const uId = String(tenant.unit_id);
+        setSelectedUnitId(uId);
+        const unit = units.find((u) => String(u.id) === uId);
         if (unit && unit.property_id) {
           setSelectedPropertyId(String(unit.property_id));
         }
       }
 
-      // Werte aus Mieter auslesen
-      const tenantCold = (tenant as any).cold_rent ?? (tenant as any).rent ?? 0;
-      const tenantUtil = (tenant as any).utility_costs ?? (tenant as any).nebenkosten ?? 0;
-      const tenantDep = (tenant as any).deposit ?? (tenant as any).kaution;
+      // Alle gängigen Feldbezeichnungen prüfen
+      const tAny = tenant as any;
+      const rawCold = tAny.cold_rent ?? tAny.rent ?? tAny.kaltmiete ?? 0;
+      const rawUtil = tAny.utility_costs ?? tAny.nebenkosten ?? 0;
+      const rawDep = tAny.deposit ?? tAny.kaution ?? 0;
 
-      if (tenantCold) setColdRent(String(tenantCold));
-      if (tenantUtil) setUtilityCosts(String(tenantUtil));
+      const numCold = parseFloat(rawCold) || 0;
+      const numUtil = parseFloat(rawUtil) || 0;
+      let numDep = parseFloat(rawDep) || 0;
 
-      // Kaution: Aus Mieter übernehmen ODER automatisch 3x Kaltmiete vorschlagen
-      if (tenantDep) {
-        setDeposit(String(tenantDep));
-      } else if (tenantCold) {
-        setDeposit(String(Number(tenantCold) * 3));
+      // Wenn keine Kaution beim Mieter eingetragen ist, direkt 3x Kaltmiete vorschlagen
+      if (!numDep && numCold > 0) {
+        numDep = numCold * 3;
       }
+
+      setColdRent(numCold > 0 ? String(numCold) : "");
+      setUtilityCosts(numUtil > 0 ? String(numUtil) : "");
+      setDeposit(numDep > 0 ? String(numDep) : "");
     }
   };
 
-  // Wenn Kaltmiete geändert wird -> Kaution automatisch anpassen (3x)
+  // Dynamische Kautions-Berechnung beim Tippen der Kaltmiete
   const handleColdRentChange = (val: string) => {
     setColdRent(val);
     const parsedCold = parseFloat(val);
@@ -112,7 +118,7 @@ export default function AddContractModal({
     const numDep = parseFloat(deposit) || 0;
 
     try {
-      // 1. Vertrag in DB speichern
+      // 1. Vertrag speichern
       const { error: contractErr } = await supabase.from("contracts").insert([
         {
           tenant_id: selectedTenantId || null,
@@ -131,7 +137,7 @@ export default function AddContractModal({
 
       if (contractErr) throw contractErr;
 
-      // 2. Kündigungsfrist an Einheit hinterlegen
+      // 2. Kündigungsfrist an der Einheit speichern
       if (selectedUnitId) {
         await supabase
           .from("units")
@@ -139,7 +145,7 @@ export default function AddContractModal({
           .eq("id", selectedUnitId);
       }
 
-      // 3. Werte im Mieter aktualisieren (Mietbeginn, Miete, NK & Kaution)
+      // 3. Werte synchron in die Mieter-Tabelle schreiben (alle Schreibweisen abdecken)
       if (selectedTenantId) {
         await supabase
           .from("tenants")
@@ -176,7 +182,7 @@ export default function AddContractModal({
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-          {/* Objekt & Einheit Auswahl */}
+          {/* Objekt & Einheit */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block font-semibold text-slate-700 mb-1">Objekt</label>
@@ -216,7 +222,7 @@ export default function AddContractModal({
             </div>
           </div>
 
-          {/* Mieter Auswahl */}
+          {/* Mieter */}
           <div>
             <label className="block font-semibold text-slate-700 mb-1">Mieter</label>
             <select
