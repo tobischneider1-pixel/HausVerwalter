@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { Property, Unit, Tenant } from "@/types";
 import { supabase } from "@/lib/supabase";
-import ContractPreviewModal, { ContractPreviewData } from "../ContractPreviewModal";
+import ContractPreviewModal, { ContractPreviewData } from "@/components/modals/ContractPreviewModal";
 
 interface Props {
   isOpen: boolean;
