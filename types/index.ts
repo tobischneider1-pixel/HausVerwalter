@@ -94,3 +94,35 @@ export interface TenantRentStatus {
   status: "paid" | "partial" | "open";
   payments: Payment[];
 }
+
+export type ContractStatus = "Entwurf" | "Versendet" | "Bestätigt" | "Unterschrieben" | "Aktiv" | "Gekündigt";
+
+export interface Contract {
+  id: string;
+  tenant_id?: string | null;
+  tenant_name: string;
+  unit_id?: string | null;
+  unit_name?: string;
+  property_id?: string | null;
+  property_address: string;
+  start_date: string;
+  cold_rent: number;
+  utility_costs?: number;
+  utility_advance?: number;
+  deposit: number;
+  special_terms?: string;
+  status: ContractStatus | string;
+  tenant_signature?: string | null;
+  landlord_signature?: string | null;
+  signature_data_url?: string | null;
+  signing_place?: string;
+  signing_timestamp?: string;
+  is_archived?: boolean;
+  end_date?: string | null;
+  cancellation_received_at?: string | null;
+  notice_period_months?: number;
+  created_at?: string;
+  confirmed_at?: string | null;
+  tenant_email?: string | null;
+}
+
