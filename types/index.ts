@@ -13,6 +13,7 @@ export interface Unit {
   size_sqm: number;
   rooms: number;
   status: string;
+  type?: string;
   properties?: { name: string };
   persons?: number;
   shares_1000?: number;
@@ -31,6 +32,8 @@ export interface Tenant {
   warm_rent: number;
   start_date?: string;
   end_date?: string;
+  move_in_date?: string;
+  move_out_date?: string;
   units?: { unit_number: string; property_id: string; properties?: { name: string } };
 }
 
@@ -60,4 +63,34 @@ export interface UnitParam {
   persons: number;
   shares: number;
   pieces: number;
+}
+
+export type DunningLevel = "erinnerung" | "mahnung_1" | "mahnung_2";
+
+export interface DunningData {
+  tenant: Tenant;
+  property?: Property;
+  unit?: Unit;
+  month: string; // z.B. "2026-09"
+  monthName: string; // z.B. "September 2026"
+  level: DunningLevel;
+  openAmount: number;
+  feeAmount: number;
+  totalDue: number;
+  dueDate: string;
+  senderName: string;
+  senderAddress: string;
+  bankName: string;
+  iban: string;
+  bic: string;
+  customText?: string;
+}
+
+export interface TenantRentStatus {
+  tenant: Tenant;
+  expectedRent: number;
+  paidAmount: number;
+  openAmount: number;
+  status: "paid" | "partial" | "open";
+  payments: Payment[];
 }

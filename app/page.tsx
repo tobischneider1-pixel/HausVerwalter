@@ -86,7 +86,13 @@ export default function Page() {
             <TenantsTab tenants={tenants} units={units} onRefresh={fetchData} />
           )}
           {activeTab === "Zahlungen" && (
-            <PaymentsTab payments={payments} />
+            <PaymentsTab
+              payments={payments}
+              tenants={tenants}
+              properties={properties}
+              units={units}
+              onRefresh={fetchData}
+            />
           )}
           {activeTab === "Betriebskosten" && (
             <OperatingCostsTab properties={properties} units={units} tenants={tenants} />
