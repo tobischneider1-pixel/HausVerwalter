@@ -14,6 +14,17 @@ interface Props {
   onRefresh?: () => void;
 }
 
+// Hilfsfunktion: Ermittelt den Abrechnungsmonat (YYYY-MM) einer Zahlung
+export const getPaymentMonth = (p: Payment): string => {
+  if (p.due_date && p.due_date.length >= 7) {
+    return p.due_date.slice(0, 7);
+  }
+  if (p.payment_date && p.payment_date.length >= 7) {
+    return p.payment_date.slice(0, 7);
+  }
+  return "";
+};
+
 export default function PaymentsTab({
   payments = [],
   tenants = [],
@@ -35,6 +46,7 @@ export default function PaymentsTab({
   const [selectedPropertyId, setSelectedPropertyId] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "open" | "partial" | "paid">("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
+  const [historyMonthFilter, setHistoryMonthFilter] = useState<"selected" | "all">("selected");
 
   // Modal State für Mahnung
   const [dunningModalData, setDunningModalData] = useState<{
@@ -49,8 +61,21 @@ export default function PaymentsTab({
     openAmount: 0,
   });
 
-  // Modal State für neue Zahlung
-  const [isAddPaymentOpen, setIsAddPaymentOpen] = useState(false);
+  // Modal State für neue / individuelle Zahlung
+  const [paymentModalData, setPaymentModalData] = useState<{
+    isOpen: boolean;
+    initialTenantId: string;
+    initialMonth: string;
+    initialAmount: number | string;
+    initialStatus: string;
+  }>({
+    isOpen: false,
+    initialTenantId: "",
+    initialMonth: currentMonthStr,
+    initialAmount: "",
+    initialStatus: "pünktlich",
+  });
+
   const [quickBookingLoading, setQuickBookingLoading] = useState<string | null>(null);
 
   // Monats-Navigation Vor / Zurück
@@ -83,12 +108,10 @@ export default function PaymentsTab({
       const expectedRent =
         tenant.warm_rent || (tenant.rent_amount || 0) + (tenant.utility_advance || 0) || 0;
 
-      // Alle Zahlungen dieses Mieters für den gewählten Monat
+      // Alle Zahlungen dieses Mieters, deren Abrechnungsmonat (due_date bzw. payment_date) dem gewählten Monat entspricht
       const monthPayments = payments.filter((p) => {
         if (String(p.tenant_id) !== String(tenant.id)) return false;
-        // Entweder Zahlungsdatum oder Fälligkeit liegt im gewählten Monat
-        const pDate = p.payment_date || p.due_date || "";
-        return pDate.startsWith(selectedMonth);
+        return getPaymentMonth(p) === selectedMonth;
       });
 
       const paidAmount = monthPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
@@ -128,10 +151,8 @@ export default function PaymentsTab({
   // Tabelle filtern (nach Status und Suchbegriff)
   const displayedStatuses = useMemo(() => {
     return tenantRentStatuses.filter((item) => {
-      // Status Filter
       if (statusFilter !== "all" && item.status !== statusFilter) return false;
 
-      // Suchfilter
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const fullName = `${item.tenant.first_name} ${item.tenant.last_name}`.toLowerCase();
@@ -145,8 +166,7 @@ export default function PaymentsTab({
   // Historie Zahlungen filtern
   const displayedHistoryPayments = useMemo(() => {
     return payments.filter((p) => {
-      // Nach Monat filtern (optional)
-      if (selectedMonth && !(p.payment_date || "").startsWith(selectedMonth)) {
+      if (historyMonthFilter === "selected" && getPaymentMonth(p) !== selectedMonth) {
         return false;
       }
       if (searchQuery.trim()) {
@@ -158,23 +178,26 @@ export default function PaymentsTab({
       }
       return true;
     });
-  }, [payments, selectedMonth, searchQuery]);
+  }, [payments, historyMonthFilter, selectedMonth, searchQuery]);
 
-  // Schnellverbuchung: Restlichen Soll-Betrag als bezahlt erfassen
+  // Schnellverbuchung: Restlichen Soll-Betrag als bezahlt für den gewählten Monat erfassen
   const handleQuickBookPayment = async (statusItem: TenantRentStatus) => {
     const { tenant, openAmount } = statusItem;
     if (openAmount <= 0) return;
 
     setQuickBookingLoading(tenant.id);
     try {
-      const today = new Date().toISOString().split("T")[0];
       const dueDate = `${selectedMonth}-01`;
+      const todayStr = new Date().toISOString().split("T")[0];
+      const isPast = selectedMonth < todayStr.slice(0, 7);
+      // Wenn der Monat in der Vergangenheit liegt (z. B. August), buchen wir das Zahlungsdatum in diesen Monat (03.)
+      const paymentDate = isPast ? `${selectedMonth}-03` : todayStr;
 
       const { error } = await supabase.from("payments").insert([
         {
           tenant_id: tenant.id,
           amount: openAmount,
-          payment_date: today,
+          payment_date: paymentDate,
           due_date: dueDate,
           type: "Miete",
           status: "pünktlich",
@@ -188,6 +211,30 @@ export default function PaymentsTab({
       alert("Fehler bei der Schnellverbuchung: " + err.message);
     } finally {
       setQuickBookingLoading(null);
+    }
+  };
+
+  // Individuelle Zahlung / Teilzahlung für einen konkreten Mieter öffnen
+  const openPaymentForTenant = (statusItem: TenantRentStatus) => {
+    setPaymentModalData({
+      isOpen: true,
+      initialTenantId: statusItem.tenant.id,
+      initialMonth: selectedMonth,
+      initialAmount: statusItem.openAmount > 0 ? statusItem.openAmount : "",
+      initialStatus: statusItem.paidAmount > 0 ? "Teilzahlung" : "pünktlich",
+    });
+  };
+
+  // Zahlungseintrag aus Historie löschen
+  const handleDeletePayment = async (id: string) => {
+    if (!confirm("Möchtest du diese Zahlung wirklich löschen?")) return;
+
+    try {
+      const { error } = await supabase.from("payments").delete().eq("id", id);
+      if (error) throw error;
+      if (onRefresh) onRefresh();
+    } catch (err: any) {
+      alert("Fehler beim Löschen der Zahlung: " + err.message);
     }
   };
 
@@ -360,9 +407,29 @@ export default function PaymentsTab({
             </select>
           )}
 
-          {/* Neue Zahlung button */}
+          {/* Monatsfilter bei Historie */}
+          {activeSubTab === "history" && (
+            <select
+              value={historyMonthFilter}
+              onChange={(e) => setHistoryMonthFilter(e.target.value as any)}
+              className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs outline-none cursor-pointer"
+            >
+              <option value="selected">📅 Nur {formattedSelectedMonth}</option>
+              <option value="all">🌐 Alle Monate anzeigen</option>
+            </select>
+          )}
+
+          {/* Neue Zahlung erfassen Button */}
           <button
-            onClick={() => setIsAddPaymentOpen(true)}
+            onClick={() =>
+              setPaymentModalData({
+                isOpen: true,
+                initialTenantId: "",
+                initialMonth: selectedMonth,
+                initialAmount: "",
+                initialStatus: "pünktlich",
+              })
+            }
             className="bg-blue-600 hover:bg-blue-500 text-white px-3.5 py-2 rounded-lg font-bold text-xs flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
           >
             ➕ Zahlung erfassen
@@ -447,24 +514,33 @@ export default function PaymentsTab({
                         </td>
 
                         <td className="py-3 px-4 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
+                          <div className="flex items-center justify-end gap-1.5 flex-wrap">
                             {openAmount > 0 && (
                               <>
-                                {/* Mahnschreiben erzeugen Button */}
+                                {/* Mahnschreiben erzeugen */}
                                 <button
                                   onClick={() => openDunningForTenant(item)}
                                   className="bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300/80 px-2.5 py-1 rounded-lg font-bold text-[11px] flex items-center gap-1 transition-colors cursor-pointer shadow-xs"
                                   title="Mahnung oder Zahlungserinnerung als PDF erstellen & in Dokumenten ablegen"
                                 >
-                                  📜 Mahnung erstellen
+                                  📜 Mahnung
                                 </button>
 
-                                {/* Schnellverbuchung */}
+                                {/* Teilzahlung oder individueller Betrag */}
+                                <button
+                                  onClick={() => openPaymentForTenant(item)}
+                                  className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 px-2.5 py-1 rounded-lg font-bold text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
+                                  title="Teilzahlung oder individuellen Betrag für diesen Mieter erfassen"
+                                >
+                                  ➕ Teilzahlung
+                                </button>
+
+                                {/* 1-Klick Vollständige Verbuchung */}
                                 <button
                                   onClick={() => handleQuickBookPayment(item)}
                                   disabled={quickBookingLoading === tenant.id}
                                   className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300/80 px-2.5 py-1 rounded-lg font-bold text-[11px] flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-50"
-                                  title="Restbetrag als eingegangen verbuchen"
+                                  title="Restlichen Betrag als vollständig bezahlt verbuchen"
                                 >
                                   {quickBookingLoading === tenant.id ? "..." : "✓ Bezahlt buchen"}
                                 </button>
@@ -472,7 +548,18 @@ export default function PaymentsTab({
                             )}
 
                             {openAmount === 0 && (
-                              <span className="text-[11px] text-slate-400 italic pr-2">Kein Rückstand</span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[11px] text-emerald-600 font-semibold pr-1">
+                                  ✓ Vollständig
+                                </span>
+                                <button
+                                  onClick={() => openPaymentForTenant(item)}
+                                  className="bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200 px-2 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer"
+                                  title="Weitere Zahlung (z.B. Kaution, Sonderzahlung) erfassen"
+                                >
+                                  + Zahlung
+                                </button>
+                              </div>
                             )}
                           </div>
                         </td>
@@ -493,48 +580,67 @@ export default function PaymentsTab({
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-[10px] uppercase font-bold tracking-wider">
-                  <th className="py-3 px-4">Zahlungsdatum</th>
+                  <th className="py-3 px-4">Zahlungseingang</th>
+                  <th className="py-3 px-4">Mietmonat</th>
                   <th className="py-3 px-4">Mieter</th>
-                  <th className="py-3 px-4">Zahlungsart</th>
-                  <th className="py-3 px-4">Fälligkeit</th>
+                  <th className="py-3 px-4">Art</th>
                   <th className="py-3 px-4">Status</th>
                   <th className="py-3 px-4">Notizen</th>
                   <th className="py-3 px-4 text-right">Betrag</th>
+                  <th className="py-3 px-4 text-center">Aktion</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {displayedHistoryPayments.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-8 text-center text-slate-400 italic">
-                      Keine Zahlungsbuchungen für den Monat {formattedSelectedMonth} gefunden.
+                    <td colSpan={8} className="py-8 text-center text-slate-400 italic">
+                      Keine Zahlungsbuchungen für diese Auswahl gefunden.
                     </td>
                   </tr>
                 ) : (
-                  displayedHistoryPayments.map((p) => (
-                    <tr key={p.id} className="hover:bg-slate-50/70 transition-colors">
-                      <td className="py-3 px-4 text-slate-600 font-medium">{p.payment_date}</td>
-                      <td className="py-3 px-4 font-bold text-slate-800">
-                        {p.tenants ? `${p.tenants.first_name} ${p.tenants.last_name}` : "-"}
-                      </td>
-                      <td className="py-3 px-4 text-slate-600">{p.type}</td>
-                      <td className="py-3 px-4 text-slate-500">{p.due_date || "-"}</td>
-                      <td className="py-3 px-4">
-                        <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
-                            p.status === "pünktlich"
-                              ? "bg-emerald-100 text-emerald-800"
-                              : "bg-amber-100 text-amber-800"
-                          }`}
-                        >
-                          {p.status}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-slate-500 text-[11px]">{p.notes || "-"}</td>
-                      <td className="py-3 px-4 text-right font-bold text-emerald-600 text-sm">
-                        {p.amount.toLocaleString("de-DE", { style: "currency", currency: "EUR" })}
-                      </td>
-                    </tr>
-                  ))
+                  displayedHistoryPayments.map((p) => {
+                    const paymentMonth = getPaymentMonth(p);
+                    return (
+                      <tr key={p.id} className="hover:bg-slate-50/70 transition-colors">
+                        <td className="py-3 px-4 text-slate-600 font-medium">{p.payment_date}</td>
+                        <td className="py-3 px-4">
+                          <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded text-[10px] font-mono font-semibold">
+                            {paymentMonth || "-"}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 font-bold text-slate-800">
+                          {p.tenants ? `${p.tenants.first_name} ${p.tenants.last_name}` : "-"}
+                        </td>
+                        <td className="py-3 px-4 text-slate-600">{p.type}</td>
+                        <td className="py-3 px-4">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                              p.status === "pünktlich"
+                                ? "bg-emerald-100 text-emerald-800"
+                                : p.status === "Teilzahlung"
+                                ? "bg-amber-100 text-amber-800"
+                                : "bg-red-100 text-red-800"
+                            }`}
+                          >
+                            {p.status}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-slate-500 text-[11px]">{p.notes || "-"}</td>
+                        <td className="py-3 px-4 text-right font-bold text-emerald-600 text-sm">
+                          {Number(p.amount).toLocaleString("de-DE", { style: "currency", currency: "EUR" })}
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <button
+                            onClick={() => handleDeletePayment(p.id)}
+                            className="text-slate-400 hover:text-red-600 p-1 rounded transition-colors cursor-pointer text-xs"
+                            title="Zahlungseintrag löschen"
+                          >
+                            🗑️
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -564,14 +670,26 @@ export default function PaymentsTab({
         />
       )}
 
-      {/* Zahlung erfassen Modal */}
+      {/* Zahlung erfassen / Teilzahlung Modal */}
       <AddPaymentModal
-        isOpen={isAddPaymentOpen}
-        onClose={() => setIsAddPaymentOpen(false)}
+        isOpen={paymentModalData.isOpen}
+        onClose={() =>
+          setPaymentModalData({
+            isOpen: false,
+            initialTenantId: "",
+            initialMonth: selectedMonth,
+            initialAmount: "",
+            initialStatus: "pünktlich",
+          })
+        }
         onSuccess={() => {
           if (onRefresh) onRefresh();
         }}
         tenants={tenants}
+        initialTenantId={paymentModalData.initialTenantId}
+        initialMonth={paymentModalData.initialMonth}
+        initialAmount={paymentModalData.initialAmount}
+        initialStatus={paymentModalData.initialStatus}
       />
     </div>
   );
